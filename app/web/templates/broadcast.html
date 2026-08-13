@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}Рассылки · ИИ-продажник{% endblock %}
+{% block body %}
+<div class="topbar"><h1>Рассылки</h1></div>
+
+{% if draft %}
+<div class="card preview">
+  <h2>Предпросмотр — так увидит подписчик</h2>
+  <div class="phone">
+    {% if draft.image_path %}<img src="/media/{{ draft.image_path }}" alt="">{% endif %}
+    <div class="ptext">{{ draft.text }}</div>
+    {% if draft.button_text and draft.button_url %}
+      <div class="pbtn">{{ draft.button_text }}</div>
+    {% endif %}
+  </div>
+  <p class="muted small">
+    Получателей: <b>{{ audience }}</b> — только те, кто сам запустил бота и не отписался.
+    {% if draft.send_at %}Отправка: {{ draft.send_at | dt }}.{% else %}Отправка сразу после подтверждения.{% endif %}
+  </p>
+  <div class="row">
+    <form method="post" action="/broadcast/{{ draft.id }}/confirm">
+      <button class="btn" type="submit">Подтвердить и отправить</button>
+    </form>
+    <form method="post" action="/broadcast/{{ draft.id }}/cancel">
+      <button class="btn ghost" type="submit">Отменить</button>
+    </form>
+  </div>
+</div>
+{% endif %}
+
+<div class="card">
+  <h2>Новая рассылка</h2>
+  <form method="post" action="/broadcast" enctype="multipart/form-data">
+    <div class="field">
+      <label>Текст</label>
+      <textarea name="text" placeholder="Что отправляем подписчикам"></textarea>
+    </div>
+    <div class="row">
+      <div class="field"><label>Текст кнопки</label>
+        <input type="text" name="button_text" placeholder="Подробнее"></div>
+      <div class="field"><label>Ссылка кнопки</label>
+        <input type="text" name="button_url" placeholder="https://..."></div>
+    </div>
+    <div class="row">
+      <div class="field"><label>Картинка</label>
+        <input type="file" name="image" accept="image/*"></div>
+      <div class="field"><label>Когда отправить</label>
+        <input type="datetime-local" name="send_at"></div>
+    </div>
+    <div class="row between">
+      <span class="muted small">Пустое поле «когда» — отправка сразу после подтверждения.</span>
+      <button class="btn" type="submit">Создать и посмотреть</button>
+    </div>
+  </form>
+</div>
+
+<div class="card">
+  <h2>История</h2>
+  {% if history %}
+  <table>
+    <tr><th>#</th><th>Текст</th><th>Статус</th><th>Доставлено</th><th>Ошибок</th><th>Создана</th><th></th></tr>
+    {% for b in history %}
+    <tr>
+      <td>{{ b.id }}</td>
+      <td>{{ b.text | short(50) }}</td>
+      <td>
+        {% if b.status == 'done' %}<span class="pill ok">отправлена</span>
+        {% elif b.status == 'draft' %}<span class="pill warn">ждёт подтверждения</span>
+        {% elif b.status == 'confirmed' %}<span class="pill">запланирована</span>
+        {% elif b.status == 'sending' %}<span class="pill">отправляется</span>
+        {% else %}<span class="pill off">{{ b.status }}</span>{% endif %}
+      </td>
+      <td>{{ b.sent_count }}</td>
+      <td>{{ b.failed_count }}</td>
+      <td class="small muted">{{ b.created_at | dt }}</td>
+      <td>
+        {% if b.status == 'draft' %}
+          <a href="/broadcast?preview={{ b.id }}" class="small">открыть</a>
+        {% elif b.status == 'done' and b.failed_count %}
+          <form method="post" action="/broadcast/{{ b.id }}/retry">
+            <button class="btn ghost small">Повторить неудачные</button>
+          </form>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  <p class="muted small">Повтор отправляет только тем, кому не дошло. Дубли исключены.</p>
+  {% else %}
+  <p class="muted">Рассылок ещё не было.</p>
+  {% endif %}
+</div>
+{% endblock %}

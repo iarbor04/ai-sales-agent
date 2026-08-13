@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Лиды · ИИ-продажник{% endblock %}
+{% block body %}
+<div class="topbar">
+  <h1>Лиды</h1>
+  <div class="botswitch">
+    <a href="/leads" class="{{ 'on' if not current }}">все</a>
+    {% for key, label in statuses.items() %}
+    <a href="/leads?status={{ key }}" class="{{ 'on' if current == key }}">{{ label }}</a>
+    {% endfor %}
+  </div>
+</div>
+
+<div class="card">
+  {% if rows %}
+  <table>
+    <tr>
+      <th>Клиент</th><th>Канал</th><th>Продукт</th><th>Потребность</th>
+      <th>Срок</th><th>Статус</th><th>Менеджер</th><th>Обновлён</th>
+    </tr>
+    {% for r in rows %}
+    <tr>
+      <td>
+        <a href="/dialogs?c={{ r.cid }}">{{ r.name or r.contact_name or r.username or r.phone or 'id' ~ r.cid }}</a>
+        {% if r.summary %}<div class="small muted">{{ r.summary | short(70) }}</div>{% endif %}
+      </td>
+      <td>{{ channels.get(r.channel, r.channel) }}</td>
+      <td>{{ r.product or '—' }}</td>
+      <td>{{ r.need | short(40) or '—' }}</td>
+      <td>{{ r.deadline or '—' }}</td>
+      <td>
+        <span class="pill {{ 'warn' if r.status == 'handed' else 'ok' if r.status == 'qualifying' }}">
+          {{ statuses[r.status] }}
+        </span>
+      </td>
+      <td class="small">{{ r.manager or '—' }}</td>
+      <td class="small muted">{{ r.updated_at | dt }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p class="muted">Лидов пока нет. Карточка заводится сама, когда агент соберёт
+    хотя бы пару полей о клиенте.</p>
+  {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+{% block title %}Диалоги · ИИ-продажник{% endblock %}
+{% block body %}
+<div class="topbar"><h1>Диалоги</h1></div>
+
+<div class="chat">
+  <div class="card people">
+    {% for p in people %}
+    <a href="/dialogs?c={{ p.id }}" class="{{ 'on' if active and active.id == p.id }}">
+      <b>{{ p.name or p.username or p.phone or 'id' ~ p.id }}</b>
+      {% if p.unread %}<span class="badge">{{ p.unread }}</span>{% endif %}
+      <div class="small muted">
+        {{ channels.get(p.channel, p.channel) }}
+        {% if not p.ai_enabled %} · у менеджера{% endif %}
+      </div>
+      <div class="small muted">{{ p.last | short(40) }}</div>
+    </a>
+    {% else %}
+    <p class="muted small">Диалогов пока нет.</p>
+    {% endfor %}
+  </div>
+
+  <div>
+    {% if active %}
+    <div class="card">
+      <div class="row between">
+        <div>
+          <b>{{ active.name or active.username or active.phone or 'id' ~ active.id }}</b>
+          <span class="pill">{{ channels.get(active.channel, active.channel) }}</span>
+          {% if active.ai_enabled %}
+            <span class="pill ok">отвечает ИИ</span>
+          {% else %}
+            <span class="pill warn">ведёт менеджер{% if active.manager %}: {{ active.manager }}{% endif %}</span>
+          {% endif %}
+        </div>
+        <div class="row">
+          {% if active.ai_enabled %}
+          <form method="post" action="/dialogs/{{ active.id }}/take">
+            <input type="hidden" name="manager" value="">
+            <button class="btn ghost small">Забрать диалог</button>
+          </form>
+          {% else %}
+          <form method="post" action="/dialogs/{{ active.id }}/return-ai">
+            <button class="btn small">Вернуть ИИ</button>
+          </form>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="thread" id="thread">
+        {% for m in thread %}
+          {% if m.author == 'system' %}
+            <div class="sysmsg">{{ m.text }}</div>
+          {% else %}
+            <div class="msg {{ 'out' if m.direction == 'out' }}">
+              {% if m.text %}{{ m.text }}{% endif %}
+              {% if m.media_path %}
+                {% if m.media_type == 'photo' %}
+                  <img src="/media/{{ m.media_path }}" alt="">
+                {% else %}
+                  <a href="/media/{{ m.media_path }}">вложение ({{ m.media_type }})</a>
+                {% endif %}
+              {% endif %}
+              <div class="meta">
+                {% if m.author == 'ai' %}ИИ{% elif m.author == 'manager' %}менеджер
+                {% elif m.author == 'broadcast' %}рассылка{% else %}клиент{% endif %}
+                · {{ m.created_at | dt }}
+              </div>
+            </div>
+          {% endif %}
+        {% endfor %}
+      </div>
+
+      <form method="post" action="/dialogs/{{ active.id }}/reply">
+        <div class="field">
+          <textarea name="text" placeholder="Ответ клиенту — уйдёт к нему в {{ channels.get(active.channel, active.channel) }}"></textarea>
+        </div>
+        <div class="row between">
+          <span class="muted small">Ответ менеджера выключает ИИ в этом диалоге.</span>
+          <button class="btn" type="submit">Отправить</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="card">
+      <h2>Карточка лида</h2>
+      <form method="post" action="/leads/{{ active.id }}/save">
+        <div class="row">
+          <div class="field"><label>Имя</label>
+            <input type="text" name="name" value="{{ lead.name if lead else '' }}"></div>
+          <div class="field"><label>Контакт</label>
+            <input type="text" name="contact" value="{{ lead.contact if lead else '' }}"></div>
+        </div>
+        <div class="row">
+          <div class="field"><label>Продукт или услуга</label>
+            <input type="text" name="product" value="{{ lead.product if lead else '' }}"></div>
+          <div class="field"><label>Срок</label>
+            <input type="text" name="deadline" value="{{ lead.deadline if lead else '' }}"></div>
+        </div>
+        <div class="field"><label>Потребность</label>
+          <input type="text" name="need" value="{{ lead.need if lead else '' }}"></div>
+        <div class="field"><label>Комментарий</label>
+          <textarea name="comment">{{ lead.comment if lead else '' }}</textarea></div>
+        <div class="field"><label>Резюме разговора</label>
+          <textarea name="summary">{{ lead.summary if lead else '' }}</textarea></div>
+        <div class="row between">
+          <span class="muted small">
+            {% if lead %}Статус: {{ statuses[lead.status] }}{% else %}Карточка ещё не заведена{% endif %}
+          </span>
+          <button class="btn" type="submit">Сохранить</button>
+        </div>
+      </form>
+
+      {% if lead %}
+      <form method="post" action="/leads/{{ active.id }}/status" class="row" style="margin-top:10px">
+        <select name="status">
+          {% for key, label in statuses.items() %}
+          <option value="{{ key }}" {{ 'selected' if lead.status == key }}>{{ label }}</option>
+          {% endfor %}
+        </select>
+        <button class="btn ghost small">Сменить статус</button>
+      </form>
+      {% endif %}
+    </div>
+
+    <script>
+      // держим ленту прокрученной вниз и подтягиваем новые сообщения
+      const box = document.getElementById('thread');
+      if (box) box.scrollTop = box.scrollHeight;
+      let last = {{ thread[-1].id if thread else 0 }};
+      setInterval(async () => {
+        const resp = await fetch('/api/dialogs/{{ active.id }}/messages?after=' + last);
+        const rows = await resp.json();
+        if (rows.length) location.reload();
+      }, 12000);
+    </script>
+    {% else %}
+    <div class="card"><p class="muted">Выберите диалог слева.</p></div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

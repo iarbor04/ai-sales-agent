@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block title %}Настройки · ИИ-продажник{% endblock %}
+{% block body %}
+<div class="topbar"><h1>Настройки</h1></div>
+
+<div class="card">
+  <h2>Состояние подключений</h2>
+  <table>
+    <tr><td>Telegram</td><td class="right">
+      {% if telegram_on %}<span class="pill ok">подключён</span>
+      {% else %}<span class="pill warn">нет токена в .env</span>{% endif %}</td></tr>
+    <tr><td>WhatsApp Business</td><td class="right">
+      {% if whatsapp_on %}<span class="pill ok">подключён</span>
+      {% else %}<span class="pill off">не подключён</span>{% endif %}</td></tr>
+    <tr><td>Модель</td><td class="right">
+      {% if ai_ready %}<span class="pill ok">ключ OpenRouter есть</span>
+      {% else %}<span class="pill warn">нет ключа — агент молчит и зовёт менеджера</span>{% endif %}</td></tr>
+    <tr><td>Режим приёма</td><td class="right"><span class="pill">{{ mode }}</span></td></tr>
+  </table>
+  {% if mode != 'webhook' and whatsapp_on %}
+  <p class="muted small">WhatsApp работает только при MODE=webhook — Cloud API не умеет polling.</p>
+  {% endif %}
+</div>
+
+<form method="post" action="/settings">
+  <div class="card">
+    <h2>О бизнесе</h2>
+    <div class="row">
+      <div class="field"><label>Название</label>
+        <input type="text" name="business_name" value="{{ values.business_name }}"></div>
+      <div class="field"><label>Сайт</label>
+        <input type="text" name="business_site" value="{{ values.business_site }}"></div>
+    </div>
+    <div class="field"><label>Приветствие на /start</label>
+      <textarea name="greeting">{{ values.greeting }}</textarea></div>
+    <div class="field"><label>Тон общения</label>
+      <input type="text" name="tone" value="{{ values.tone }}"
+        placeholder="дружелюбный, короткий, по делу"></div>
+  </div>
+
+  <div class="card">
+    <h2>Модель</h2>
+    <div class="field">
+      <label>Модель для ответов</label>
+      {% if models %}
+      <select name="model">
+        {% for m in models %}
+        <option value="{{ m.id }}" {{ 'selected' if values.model == m.id }}>{{ m.id }}</option>
+        {% endfor %}
+      </select>
+      {% else %}
+      <input type="text" name="model" value="{{ values.model }}">
+      <span class="muted small">Список недоступен — впишите идентификатор модели вручную.</span>
+      {% endif %}
+    </div>
+    <label class="row">
+      <input type="checkbox" name="ai_enabled_global"
+        {{ 'checked' if values.ai_enabled_global == '1' }}>
+      <span>ИИ отвечает клиентам</span>
+    </label>
+    <p class="muted small">Снятая галочка — общий стоп: все новые диалоги идут сразу менеджеру.</p>
+  </div>
+
+  <div class="card">
+    <h2>Менеджеры</h2>
+    <div class="field"><label>Chat ID для уведомлений</label>
+      <input type="text" name="operator_chat_id" value="{{ values.operator_chat_id }}"></div>
+    <p class="muted small">
+      Искать ID не нужно: добавьте бота в рабочую группу и напишите там —
+      уведомления пойдут туда. Для личных сообщений подойдёт ваш ID.
+    </p>
+    <div class="field"><label>Список менеджеров через запятую</label>
+      <input type="text" name="managers" value="{{ values.managers }}"
+        placeholder="Анна, Игорь, Пётр"></div>
+    <p class="muted small">Ответственный назначается по кругу, чтобы лиды не падали на одного.</p>
+    <div class="field"><label>Что агент пишет клиенту при передаче</label>
+      <textarea name="handoff_note">{{ values.handoff_note }}</textarea></div>
+  </div>
+
+  <button class="btn" type="submit">Сохранить</button>
+</form>
+{% endblock %}

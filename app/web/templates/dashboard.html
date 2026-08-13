@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Обзор · ИИ-продажник{% endblock %}
+{% block body %}
+<div class="topbar"><h1>Обзор</h1></div>
+
+{% if not kb.loaded %}
+<div class="card warn">
+  <b>База знаний пуста.</b> Агент пока не может отвечать по информации бизнеса
+  и будет передавать все диалоги менеджеру.
+  <a href="/knowledge">Заполнить базу знаний</a>
+</div>
+{% endif %}
+
+<div class="grid c4">
+  <div class="stat"><div class="n">{{ stats.contacts }}</div><div class="l">контактов</div></div>
+  <div class="stat"><div class="n">{{ stats.leads }}</div><div class="l">лидов</div></div>
+  <div class="stat"><div class="n">{{ stats.handed }}</div><div class="l">у менеджера</div></div>
+  <div class="stat"><div class="n">{{ stats.audience }}</div><div class="l">подписчиков бота</div></div>
+</div>
+
+<div class="grid c2">
+  <div class="card">
+    <h2>Лиды по статусам</h2>
+    <table>
+      {% for key, label in statuses.items() %}
+      <tr>
+        <td><a href="/leads?status={{ key }}">{{ label }}</a></td>
+        <td class="right"><b>{{ by_status[key] }}</b></td>
+      </tr>
+      {% endfor %}
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>База знаний</h2>
+    <table>
+      <tr><td>Найдено страниц</td><td class="right"><b>{{ kb.total }}</b></td></tr>
+      <tr><td>Включено</td><td class="right"><b>{{ kb.included }}</b></td></tr>
+      <tr><td>Загружено</td><td class="right"><b>{{ kb.loaded }}</b></td></tr>
+      <tr><td>Фрагментов для поиска</td><td class="right"><b>{{ kb.chunks }}</b></td></tr>
+    </table>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Последние обращения</h2>
+  {% if recent %}
+  <table>
+    <tr><th>Клиент</th><th>Канал</th><th>Статус</th><th>Когда</th></tr>
+    {% for r in recent %}
+    <tr>
+      <td><a href="/dialogs?c={{ r.id }}">{{ r.name or r.username or r.phone or 'id' ~ r.id }}</a></td>
+      <td>{{ channels.get(r.channel, r.channel) }}</td>
+      <td>{% if r.lead_status %}<span class="pill">{{ statuses[r.lead_status] }}</span>{% endif %}</td>
+      <td class="muted small">{{ r.last_msg_at | dt }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p class="muted">Пока никто не написал. Напишите боту сами — диалог появится здесь.</p>
+  {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block title %}База знаний · ИИ-продажник{% endblock %}
+{% block body %}
+<div class="topbar"><h1>База знаний</h1></div>
+
+<div class="card">
+  <h2>Шаг 1. Найти страницы сайта</h2>
+  <form method="post" action="/knowledge/discover" class="row">
+    <input type="text" name="site" value="{{ site }}" placeholder="example.com">
+    <button class="btn" type="submit">Найти страницы</button>
+  </form>
+  <p class="muted small">
+    Обходим только внутренние публичные страницы этого домена.
+    Недоступные пропускаем и идём дальше.
+  </p>
+</div>
+
+{% if pages %}
+<div class="card">
+  <h2>Шаг 2. Убрать лишнее и загрузить</h2>
+  <p class="muted small">
+    Найдено {{ stats.total }}, включено {{ stats.included }}, загружено {{ stats.loaded }},
+    фрагментов для поиска {{ stats.chunks }}.
+  </p>
+  <form method="post" action="/knowledge/select">
+    <table>
+      <tr><th style="width:40px"></th><th>Страница</th><th>Символов</th><th>Статус</th></tr>
+      {% for p in pages %}
+      <tr>
+        <td><input type="checkbox" name="page_{{ p.id }}" {{ 'checked' if p.included }}></td>
+        <td>
+          {{ p.title or p.url }}
+          <div class="small muted">{{ p.url }}</div>
+        </td>
+        <td>{{ p.chars or '—' }}</td>
+        <td>
+          {% if p.status == 'loaded' %}<span class="pill ok">загружена</span>
+          {% elif p.status == 'error' %}<span class="pill warn">недоступна</span>
+          {% else %}<span class="pill">найдена</span>{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+    <div class="row between" style="margin-top:12px">
+      <span class="muted small">Снятая галочка убирает страницу из базы знаний.</span>
+      <button class="btn" type="submit">Сохранить и загрузить включённые</button>
+    </div>
+  </form>
+</div>
+{% endif %}
+
+<div class="card">
+  <h2>Вписать вручную</h2>
+  <form method="post" action="/knowledge/extra">
+    <div class="field">
+      <textarea name="text" style="min-height:180px"
+        placeholder="Прайс, условия доставки, частые вопросы — всё, чего нет на сайте">{{ extra }}</textarea>
+    </div>
+    <button class="btn" type="submit">Сохранить</button>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Проверить</h2>
+  <div class="row">
+    <input type="text" id="q" placeholder="Например: сколько стоит доставка?">
+    <button class="btn ghost" onclick="testKb()">Что найдёт агент</button>
+  </div>
+  <pre id="out" class="out"></pre>
+</div>
+
+<script>
+async function testKb() {
+  const q = document.getElementById('q').value;
+  const resp = await fetch('/knowledge/test?q=' + encodeURIComponent(q));
+  const rows = await resp.json();
+  const out = document.getElementById('out');
+  if (!rows.length) { out.textContent = 'Ничего не нашлось — агент передаст диалог менеджеру.'; return; }
+  out.textContent = rows.map(r => '[' + r.score + '] ' + (r.title || r.url) + '\n' + r.text.slice(0, 400)).join('\n\n');
+}
+</script>
+{% endblock %}
