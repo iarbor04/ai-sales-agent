@@ -78,3 +78,12 @@ async def broadcast_done(broadcast_id: int, sent: int, failed: int) -> None:
         f"📣 Рассылка #{broadcast_id} завершена.\n"
         f"Доставлено: {sent}. Ошибок: {failed}."
     )
+
+
+async def rival_changed(title: str, url: str, summary: str) -> None:
+    """Важное изменение у конкурента — сразу в чат менеджеров."""
+    await _push(
+        f"👀 <b>Конкурент: {title}</b>\n{summary}\n"
+        f'<a href="{url}">Открыть страницу</a> · '
+        f'<a href="{config.PUBLIC_URL}/rivals">Все изменения</a>'
+    )

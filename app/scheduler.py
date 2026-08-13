@@ -8,7 +8,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from . import broadcast, config, db, sheets
+from . import broadcast, config, db, rivals, sheets
 
 log = logging.getLogger("scheduler")
 
@@ -19,7 +19,14 @@ _last_sheets_sync = 0
 async def _tick() -> None:
     await broadcast.due()
     await _sync_sheets()
+    await _watch_rivals()
     await _retry_pending()
+
+
+async def _watch_rivals() -> None:
+    """Обход сайтов конкурентов по расписанию из настроек."""
+    if rivals.due():
+        await rivals.check_all()
 
 
 async def _sync_sheets() -> None:

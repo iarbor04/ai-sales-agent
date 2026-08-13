@@ -180,6 +180,29 @@ def main() -> int:
 
     asyncio.run(behaviour())
 
+    section("Шаблоны и конструктор сценария")
+    keys = list(db.SCRIPT_TEMPLATES)
+    check("шаблоны сценариев есть", len(keys) >= 3, f"шаблонов {len(keys)}")
+    long_ones = [k for k, t in db.SCRIPT_TEMPLATES.items() if len(t["steps"]) > 5]
+    check("в шаблонах не больше пяти шагов", not long_ones, ", ".join(long_ones))
+    applied = db.apply_template(keys[0])
+    check("шаблон применяется", applied == len(db.SCRIPT_TEMPLATES[keys[0]]["steps"]))
+    ids = [s["id"] for s in db.script()]
+    db.reorder_script(list(reversed(ids)))
+    check("порядок шагов меняется", [s["id"] for s in db.script()] == list(reversed(ids)))
+
+    section("Конкуренты")
+    from app import rivals
+    rid = db.add_rival("Тестовый конкурент", "https://example.com/price")
+    check("конкурент добавляется", len(db.rivals()) == 1)
+    db.add_rival("Он же", "https://example.com/price")
+    check("дубль по адресу не создаётся", len(db.rivals()) == 1)
+    diff = rivals._diff("Цена 100 руб\nДоставка бесплатно",
+                        "Цена 150 руб\nДоставка бесплатно")
+    check("разница по строкам считается", "150" in diff and "100" in diff, diff[:60])
+    check("неизменное в разницу не попадает", "Доставка" not in diff)
+    check("обход по расписанию определяется", rivals.due() is True)
+
     section("Онбординг")
     progress = onboarding.progress()
     check("чек-лист считается", progress["total"] > 0 and "steps" in progress)

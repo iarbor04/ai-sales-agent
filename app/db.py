@@ -193,6 +193,26 @@ SCHEMA = [
         last_error TEXT,
         created_at INTEGER NOT NULL
     )""",
+    # Конкуренты: следим за их публичными страницами и замечаем изменения.
+    """CREATE TABLE IF NOT EXISTS rivals (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT NOT NULL,
+        url TEXT NOT NULL UNIQUE,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        last_hash TEXT,
+        last_text TEXT,
+        checked_at INTEGER,
+        last_error TEXT,
+        created_at INTEGER NOT NULL
+    )""",
+    """CREATE TABLE IF NOT EXISTS rival_changes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        rival_id INTEGER NOT NULL,
+        summary TEXT,
+        details TEXT,
+        important INTEGER NOT NULL DEFAULT 0,
+        found_at INTEGER NOT NULL
+    )""",
     """CREATE TABLE IF NOT EXISTS settings (
         key TEXT PRIMARY KEY,
         value TEXT
@@ -233,6 +253,61 @@ DEFAULT_SCRIPT = [
     ("Контакт", "Взять телефон или почту и передать разговор менеджеру.", "contact"),
 ]
 
+# Готовые сценарии под нишу. Владелец выбирает свой в конструкторе и правит
+# под себя — это быстрее, чем придумывать шаги с нуля.
+SCRIPT_TEMPLATES = {
+    "shop": {
+        "title": "Интернет-магазин",
+        "hint": "товар, наличие, доставка",
+        "steps": [
+            ("Знакомство", "Понять, какой товар интересует, и узнать имя.", "name"),
+            ("Что нужно", "Выяснить модель, размер, цвет или комплектацию.", "product"),
+            ("Доставка", "Узнать город и когда нужно получить.", "deadline"),
+            ("Контакт", "Взять телефон и передать заказ менеджеру.", "contact"),
+        ],
+    },
+    "services": {
+        "title": "Услуги",
+        "hint": "задача, объём, сроки",
+        "steps": [
+            ("Знакомство", "Понять, с какой задачей пришёл клиент, узнать имя.", "name"),
+            ("Задача", "Выяснить, что именно нужно сделать и в каком объёме.", "need"),
+            ("Сроки", "Узнать, к какому сроку нужен результат.", "deadline"),
+            ("Контакт", "Взять телефон или почту и передать менеджеру.", "contact"),
+        ],
+    },
+    "realty": {
+        "title": "Недвижимость",
+        "hint": "объект, бюджет, просмотр",
+        "steps": [
+            ("Знакомство", "Понять, что ищет клиент: покупка или аренда, узнать имя.", "name"),
+            ("Объект", "Выяснить район, количество комнат и другие пожелания.", "product"),
+            ("Условия", "Узнать про ипотеку, сроки заселения, что важно.", "need"),
+            ("Просмотр", "Взять телефон и передать менеджеру для показа.", "contact"),
+        ],
+    },
+    "education": {
+        "title": "Обучение",
+        "hint": "цель, уровень, старт",
+        "steps": [
+            ("Знакомство", "Узнать имя и чему человек хочет научиться.", "name"),
+            ("Цель", "Выяснить, зачем это нужно и какой сейчас уровень.", "need"),
+            ("Старт", "Узнать, когда готов начать.", "deadline"),
+            ("Контакт", "Взять контакт и передать куратору.", "contact"),
+        ],
+    },
+    "clinic": {
+        "title": "Услуги с записью",
+        "hint": "услуга, врач, время",
+        "steps": [
+            ("Знакомство", "Понять, с чем обращается клиент, узнать имя.", "name"),
+            ("Услуга", "Выяснить, какая процедура или специалист нужны.", "product"),
+            ("Время", "Узнать удобный день и время.", "deadline"),
+            ("Запись", "Взять телефон и передать администратору.", "contact"),
+        ],
+    },
+}
+
 DEFAULT_SETTINGS = {
     "business_name": "",
     "business_site": "",
@@ -250,6 +325,9 @@ DEFAULT_SETTINGS = {
     "sheets_kb_url": "",
     "sheets_crm_id": "",
     "sheets_crm_tab": "Лиды",
+    # как часто обходить сайты конкурентов, в часах
+    "rivals_every_hours": "12",
+    "rivals_notify": "1",
 }
 
 
@@ -592,3 +670,49 @@ def close_request(request_id: int) -> None:
 def open_requests_count() -> int:
     row = q1("SELECT COUNT(*) AS c FROM requests WHERE status != 'closed'")
     return row["c"] if row else 0
+
+
+def apply_template(key: str, bot_id: int | None = None) -> int:
+    """Заменить сценарий готовым шаблоном. Возвращает число шагов."""
+    template = SCRIPT_TEMPLATES.get(key)
+    if not template:
+        return 0
+    run("DELETE FROM script_steps WHERE bot_id IS ?", (bot_id,))
+    for position, (title, goal, field) in enumerate(template["steps"]):
+        run(
+            "INSERT INTO script_steps (bot_id, position, title, goal, ask_field, enabled)"
+            " VALUES (?, ?, ?, ?, ?, 1)",
+            (bot_id, position, title, goal, field),
+        )
+    return len(template["steps"])
+
+
+def reorder_script(order: list[int]) -> None:
+    """Сохранить новый порядок шагов после перетаскивания."""
+    for position, step_id in enumerate(order):
+        run("UPDATE script_steps SET position = ? WHERE id = ?", (position, step_id))
+
+
+# ── конкуренты ─────────────────────────────────────────────────────────
+
+def rivals(only_enabled: bool = False) -> list[sqlite3.Row]:
+    sql = "SELECT * FROM rivals"
+    if only_enabled:
+        sql += " WHERE enabled = 1"
+    return q(sql + " ORDER BY id")
+
+
+def add_rival(title: str, url: str) -> int:
+    return run(
+        "INSERT OR IGNORE INTO rivals (title, url, created_at) VALUES (?, ?, ?)",
+        (title.strip(), url.strip(), now()),
+    )
+
+
+def rival_changes(limit: int = 100) -> list[sqlite3.Row]:
+    return q(
+        "SELECT c.*, r.title, r.url FROM rival_changes c"
+        " JOIN rivals r ON r.id = c.rival_id"
+        " ORDER BY c.id DESC LIMIT ?",
+        (limit,),
+    )

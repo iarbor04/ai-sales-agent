@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+{% block title %}Конкуренты · ИИ-продажник{% endblock %}
+{% block body %}
+<div class="topbar">
+  <div style="flex:1">
+    <h1>Конкуренты</h1>
+    <p class="sub">Следим за их страницами и говорим, когда там меняются
+      цены и условия.</p>
+  </div>
+  {% if rows %}
+  <form method="post" action="/rivals/check">
+    <button class="btn ghost small">Проверить сейчас</button>
+  </form>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>Добавить страницу <span class="hint">прайс, тарифы, страницу услуги</span></h2>
+  <p class="lead-text">
+    Указывайте конкретные адреса, а не главную: блог и новости меняются каждый
+    день и дают только шум. Лучше всего работает страница с ценами.
+  </p>
+  <form method="post" action="/rivals/add" class="row">
+    <div class="field"><label>Название</label>
+      <input type="text" name="title" placeholder="Конкурент — тарифы"></div>
+    <div class="field"><label>Адрес страницы</label>
+      <input type="text" name="url" placeholder="example.com/price" required></div>
+    <button class="btn" type="submit">Следить</button>
+  </form>
+  {% if not ai_ready %}
+  <div class="callout">
+    Ключ модели не задан — изменения будем замечать, но объяснять их
+    человеческим языком не сможем. <a href="/settings">Вставить ключ</a>
+  </div>
+  {% endif %}
+</div>
+
+{% if rows %}
+<div class="card">
+  <h2>Под наблюдением</h2>
+  <table>
+    <tr><th>Страница</th><th style="width:130px">Проверена</th>
+        <th style="width:120px">Состояние</th><th style="width:150px"></th></tr>
+    {% for r in rows %}
+    <tr>
+      <td>
+        <b>{{ r.title }}</b>
+        <div class="small dim">{{ r.url }}</div>
+      </td>
+      <td class="small muted">{{ r.checked_at | dt or 'ещё нет' }}</td>
+      <td>
+        {% if r.last_error %}<span class="pill bad" title="{{ r.last_error }}">ошибка</span>
+        {% elif not r.enabled %}<span class="pill off">пауза</span>
+        {% elif r.last_hash %}<span class="pill ok">следим</span>
+        {% else %}<span class="pill">первый обход</span>{% endif %}
+      </td>
+      <td>
+        <div class="row tight">
+          <form method="post" action="/rivals/{{ r.id }}/toggle">
+            <button class="btn ghost small">{{ 'Пауза' if r.enabled else 'Включить' }}</button>
+          </form>
+          <form method="post" action="/rivals/{{ r.id }}/delete"
+                onsubmit="return confirm('Убрать {{ r.title }} из наблюдения?')">
+            <button class="btn ghost small">Убрать</button>
+          </form>
+        </div>
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% if rows and rows[0].last_error %}
+  <div class="callout">Ошибка у страницы: {{ rows[0].last_error }}</div>
+  {% endif %}
+</div>
+{% endif %}
+
+<div class="card">
+  <h2>Что изменилось</h2>
+  {% if changes %}
+  <table>
+    <tr><th style="width:110px">Когда</th><th>Конкурент</th><th>Что произошло</th></tr>
+    {% for c in changes %}
+    <tr>
+      <td class="small dim">{{ c.found_at | dt }}</td>
+      <td>
+        <a href="{{ c.url }}" target="_blank">{{ c.title }}</a>
+        {% if c.important %}<div><span class="pill warn">важно</span></div>{% endif %}
+      </td>
+      <td>
+        {{ c.summary }}
+        {% if c.details %}
+        <details>
+          <summary class="small dim" style="cursor:pointer">показать построчно</summary>
+          <pre class="dump">{{ c.details }}</pre>
+        </details>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <div class="empty">
+    <div class="big">Изменений пока нет</div>
+    <p class="muted">
+      {% if rows %}Первый обход просто запоминает страницы. Всё, что поменяется
+      дальше, попадёт сюда.{% else %}Добавьте страницу конкурента выше.{% endif %}
+    </p>
+  </div>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>Настройки слежки</h2>
+  <form method="post" action="/rivals/settings">
+    <div class="row">
+      <div class="field"><label>Как часто обходить, часов</label>
+        <input type="number" name="every" value="{{ every }}" min="1" max="168"></div>
+    </div>
+    <label class="check">
+      <input type="checkbox" name="notify_on" {{ 'checked' if notify_on }}>
+      <span>писать менеджеру в Telegram, если изменение важное</span>
+    </label>
+    <p class="dim small">
+      Важным считаются цены, тарифы, условия, новый продукт или акция.
+      Правки текста и даты не беспокоят.
+      {% if last_run %}Последний обход: {{ last_run | dt }}.{% endif %}
+    </p>
+    <button class="btn" type="submit">Сохранить</button>
+  </form>
+</div>
+{% endblock %}

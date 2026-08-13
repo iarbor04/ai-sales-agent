@@ -26,8 +26,8 @@ from fastapi.templating import Jinja2Templates
 from itsdangerous import BadSignature, URLSafeSerializer
 
 from .. import (
-    broadcast, config, db, knowledge, llm, onboarding, retrieval, sales,
-    scheduler, sheets,
+    broadcast, config, db, knowledge, llm, onboarding, retrieval, rivals,
+    sales, scheduler, sheets,
 )
 from .. import channels
 from ..channels import base, telegram, whatsapp
@@ -661,6 +661,7 @@ async def script_page(request: Request, bot: int | None = None):
     )
     return page(request, "script.html", steps=steps, bot_id=bot,
                 sales_bots=db.bots(role="sales", only_enabled=False),
+                templates=db.SCRIPT_TEMPLATES,
                 fields=db.LEAD_FIELDS)
 
 
@@ -721,3 +722,207 @@ async def script_copy(bot_id: int = Form(...)):
              step["ask_field"], step["enabled"]),
         )
     return RedirectResponse(f"/script?bot={bot_id}", status_code=303)
+
+
+# ── мастер запуска ─────────────────────────────────────────────────────
+# Как у конкурентов: бот собирается кликами за 10-30 минут, а не хождением
+# по разделам панели. Каждый шаг делается прямо здесь и сразу сохраняется.
+
+SETUP_STEPS = [
+    ("bot", "Подключить бота"),
+    ("business", "О бизнесе"),
+    ("knowledge", "База знаний"),
+    ("script", "Сценарий"),
+    ("launch", "Проверка и запуск"),
+]
+
+
+def _setup_ready(step: str) -> bool:
+    """Пройден ли шаг по факту."""
+    if step == "bot":
+        return bool(db.bots(role="sales", only_enabled=True))
+    if step == "business":
+        return bool(db.setting("business_name", "").strip())
+    if step == "knowledge":
+        return knowledge.stats()["loaded"] > 0
+    if step == "script":
+        return bool(db.script())
+    if step == "launch":
+        return llm.ai_ready() and bool(db.bots(role="sales", only_enabled=True))
+    return False
+
+
+@app.get("/setup", response_class=HTMLResponse)
+async def setup_page(request: Request, step: str = "bot"):
+    if step not in dict(SETUP_STEPS):
+        step = "bot"
+    index = [k for k, _ in SETUP_STEPS].index(step)
+
+    return page(
+        request, "setup.html",
+        steps=SETUP_STEPS, step=step, index=index,
+        done={key: _setup_ready(key) for key, _ in SETUP_STEPS},
+        bots=db.bots(only_enabled=False),
+        live=set(telegram.BOTS),
+        values={k: db.setting(k, "") for k in
+                ("business_name", "business_site", "greeting", "tone",
+                 "operator_chat_id", "managers")},
+        kb=knowledge.stats(),
+        sheet_url=db.setting("sheets_kb_url", ""),
+        extra=db.setting("kb_extra", ""),
+        script=db.script(),
+        templates=db.SCRIPT_TEMPLATES,
+        ai_ready=llm.ai_ready(),
+        key_source=_key_source(),
+        model=llm.current_model(),
+    )
+
+
+@app.post("/setup/bot")
+async def setup_bot(title: str = Form(""), token: str = Form(...), role: str = Form("sales")):
+    probe = await telegram.check_token(token.strip())
+    if not probe["ok"]:
+        return RedirectResponse(f"/setup?step=bot&error={probe['error'][:100]}", status_code=303)
+    if not db.q1("SELECT 1 FROM bots WHERE token = ?", (token.strip(),)):
+        db.add_bot(title.strip() or f"@{probe['username']}", token.strip(),
+                   role if role in ("sales", "manager") else "sales")
+        await telegram.reload()
+    nxt = "business" if role == "sales" else "bot"
+    return RedirectResponse(f"/setup?step={nxt}", status_code=303)
+
+
+@app.post("/setup/business")
+async def setup_business(request: Request):
+    form = await request.form()
+    for key in ("business_name", "business_site", "greeting", "tone"):
+        if key in form:
+            db.set_setting(key, str(form.get(key) or ""))
+    return RedirectResponse("/setup?step=knowledge", status_code=303)
+
+
+@app.post("/setup/knowledge")
+async def setup_knowledge(request: Request):
+    """Все три источника знаний прямо в мастере, без перехода на другую страницу."""
+    form = await request.form()
+
+    sheet = str(form.get("sheet_url") or "").strip()
+    if sheet != db.setting("sheets_kb_url", ""):
+        db.set_setting("sheets_kb_url", sheet)
+        if sheet:
+            await asyncio.to_thread(sheets.sync_knowledge)
+
+    text = str(form.get("kb_extra") or "").strip()
+    if text != db.setting("kb_extra", ""):
+        db.set_setting("kb_extra", text)
+        knowledge.reindex_extra()
+
+    site = str(form.get("site") or "").strip()
+    if site:
+        db.set_setting("business_site", site)
+        await asyncio.to_thread(knowledge.discover, site)
+        await asyncio.to_thread(knowledge.fetch_pending)
+
+    retrieval.invalidate()
+    target = "knowledge" if form.get("stay") else "script"
+    return RedirectResponse(f"/setup?step={target}", status_code=303)
+
+
+@app.post("/setup/script")
+async def setup_script(template: str = Form(""), enable: str = Form("")):
+    if template:
+        db.apply_template(template)
+    for bot in db.bots(role="sales", only_enabled=False):
+        db.run("UPDATE bots SET script_enabled = ? WHERE id = ?",
+               (1 if enable else 0, bot["id"]))
+    return RedirectResponse("/setup?step=launch", status_code=303)
+
+
+@app.post("/setup/launch")
+async def setup_launch(request: Request):
+    form = await request.form()
+    key = str(form.get("openrouter_key") or "").strip()
+    if key:
+        db.set_setting("openrouter_key", key)
+    if form.get("model"):
+        db.set_setting("model", str(form.get("model")))
+    if "operator_chat_id" in form:
+        db.set_setting("operator_chat_id", str(form.get("operator_chat_id") or ""))
+    if "managers" in form:
+        db.set_setting("managers", str(form.get("managers") or ""))
+    return RedirectResponse("/setup?step=launch&saved=1", status_code=303)
+
+
+# ── конструктор сценария ───────────────────────────────────────────────
+
+@app.post("/script/template")
+async def script_template(request: Request, template: str = Form(...),
+                          bot_id: str = Form("")):
+    target = int(bot_id) if bot_id else None
+    db.apply_template(template, target)
+    return RedirectResponse(f"/script?bot={bot_id}" if bot_id else "/script",
+                            status_code=303)
+
+
+@app.post("/script/reorder")
+async def script_reorder(request: Request):
+    """Новый порядок после перетаскивания карточек."""
+    data = await request.json()
+    order = [int(x) for x in data.get("order", [])]
+    db.reorder_script(order)
+    return JSONResponse({"ok": True})
+
+
+@app.post("/script/step/{step_id}/delete")
+async def script_step_delete(step_id: int, bot_id: str = Form("")):
+    db.run("DELETE FROM script_steps WHERE id = ?", (step_id,))
+    return RedirectResponse(f"/script?bot={bot_id}" if bot_id else "/script",
+                            status_code=303)
+
+
+# ── конкуренты ─────────────────────────────────────────────────────────
+
+@app.get("/rivals", response_class=HTMLResponse)
+async def rivals_page(request: Request):
+    last = db.setting("rivals_last_run", "")
+    return page(request, "rivals.html",
+                rows=db.rivals(), changes=db.rival_changes(60),
+                every=db.setting("rivals_every_hours", "12"),
+                notify_on=db.setting("rivals_notify", "1") == "1",
+                last_run=int(last) if last.isdigit() else 0,
+                ai_ready=llm.ai_ready())
+
+
+@app.post("/rivals/add")
+async def rivals_add(title: str = Form(""), url: str = Form(...)):
+    url = url.strip()
+    if not url.startswith("http"):
+        url = "https://" + url
+    db.add_rival(title.strip() or url, url)
+    return RedirectResponse("/rivals", status_code=303)
+
+
+@app.post("/rivals/{rival_id}/toggle")
+async def rivals_toggle(rival_id: int):
+    db.run("UPDATE rivals SET enabled = 1 - enabled WHERE id = ?", (rival_id,))
+    return RedirectResponse("/rivals", status_code=303)
+
+
+@app.post("/rivals/{rival_id}/delete")
+async def rivals_delete(rival_id: int):
+    db.run("DELETE FROM rival_changes WHERE rival_id = ?", (rival_id,))
+    db.run("DELETE FROM rivals WHERE id = ?", (rival_id,))
+    return RedirectResponse("/rivals", status_code=303)
+
+
+@app.post("/rivals/check")
+async def rivals_check():
+    """Проверить всех прямо сейчас, не дожидаясь расписания."""
+    await rivals.check_all()
+    return RedirectResponse("/rivals", status_code=303)
+
+
+@app.post("/rivals/settings")
+async def rivals_settings(every: str = Form("12"), notify_on: str = Form("")):
+    db.set_setting("rivals_every_hours", every.strip() or "12")
+    db.set_setting("rivals_notify", "1" if notify_on else "0")
+    return RedirectResponse("/rivals", status_code=303)

@@ -457,3 +457,74 @@ label { display: block; font-size: 12.5px; color: var(--text-2); margin-bottom: 
   .messenger .info { display: none; }
   .thread { height: 56vh; }
 }
+
+/* ── мастер запуска ─────────────────────────────────────────────────── */
+
+.wizard { max-width: 820px; }
+.wsteps {
+  display: flex; gap: 6px; margin-bottom: 18px; flex-wrap: wrap;
+}
+.wstep {
+  flex: 1; min-width: 128px; display: flex; align-items: center; gap: 9px;
+  padding: 10px 12px; border-radius: var(--radius-sm);
+  background: var(--surface); border: 1px solid var(--border);
+  color: var(--text-2); font-size: 13px;
+}
+.wstep:hover { text-decoration: none; border-color: var(--border-strong); }
+.wstep .num {
+  width: 22px; height: 22px; flex: 0 0 22px; border-radius: 50%;
+  display: grid; place-items: center; font-size: 12px; font-weight: 650;
+  background: var(--surface-2); color: var(--text-3);
+}
+.wstep.ok .num { background: var(--brand); color: #fff; }
+.wstep.on {
+  border-color: var(--brand); background: var(--brand-soft);
+  color: var(--brand-text); font-weight: 600;
+}
+.wstep.on .num { background: var(--brand); color: #fff; }
+
+.wbody { padding: 24px 26px; }
+.wbody h2 { font-size: 18px; margin-bottom: 6px; }
+.wbody .lead-text { margin-bottom: 18px; }
+.wnav {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-top: 22px; padding-top: 16px; border-top: 1px solid var(--border-soft);
+}
+.finish { margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--border-soft); }
+.finish h3 { font-size: 14px; margin: 0 0 10px; }
+
+/* карточки выбора: шаблон сценария и подобное */
+.picks { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; }
+.pick {
+  display: flex; gap: 10px; align-items: flex-start; cursor: pointer;
+  padding: 12px 13px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border); background: var(--surface); margin: 0;
+  transition: border-color .12s ease, background .12s ease;
+}
+.pick:hover { border-color: var(--brand); }
+.pick input { margin-top: 2px; accent-color: var(--brand); flex: 0 0 auto; }
+.pick:has(input:checked) { border-color: var(--brand); background: var(--brand-soft); }
+.pick .pbody { display: flex; flex-direction: column; gap: 1px; }
+.pick .pbody b { color: var(--text); }
+
+/* ── конструктор сценария ───────────────────────────────────────────── */
+
+.steplist { display: flex; flex-direction: column; gap: 10px; }
+.stepcard {
+  display: flex; gap: 12px; align-items: flex-start;
+  padding: 13px 14px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border); background: var(--surface);
+}
+.stepcard.drag { opacity: .4; }
+.stepcard.over { border-color: var(--brand); border-style: dashed; }
+.stepcard .grip {
+  cursor: grab; color: var(--text-3); user-select: none;
+  padding-top: 6px; font-size: 15px; line-height: 1;
+}
+.stepcard .idx {
+  width: 24px; height: 24px; flex: 0 0 24px; border-radius: 50%;
+  display: grid; place-items: center; font-size: 12px; font-weight: 650;
+  background: var(--brand-soft); color: var(--brand-text); margin-top: 3px;
+}
+.stepcard .fields { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.stepcard .off { opacity: .5; }
