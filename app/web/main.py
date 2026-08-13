@@ -25,7 +25,10 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from itsdangerous import BadSignature, URLSafeSerializer
 
-from .. import broadcast, config, db, knowledge, llm, retrieval, sales, scheduler
+from .. import (
+    broadcast, config, db, knowledge, llm, retrieval, sales, scheduler, sheets,
+)
+from .. import channels
 from ..channels import base, telegram, whatsapp
 
 log = logging.getLogger("web")
@@ -45,6 +48,7 @@ templates.env.filters["short"] = lambda text, n=60: (
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI):
     db.init()
+    channels.adopt_env_token()
     knowledge.reindex_extra()
     await telegram.start()
     await scheduler.start()
@@ -76,7 +80,9 @@ def authed(request: Request) -> bool:
 
 def page(request: Request, name: str, **ctx) -> HTMLResponse:
     ctx.setdefault("unread", db.unread_count())
+    ctx.setdefault("open_requests", db.open_requests_count())
     ctx.setdefault("statuses", db.LEAD_STATUSES)
+    ctx.setdefault("req_statuses", db.REQUEST_STATUSES)
     ctx.setdefault("channels", config.CHANNEL_TITLES)
     ctx.setdefault("ai_on", db.setting("ai_enabled_global", "1") == "1")
     ctx.setdefault("path", request.url.path)
@@ -96,8 +102,8 @@ async def guard(request: Request, call_next):
 async def health():
     return {
         "ok": True,
-        "channels": config.active_channels(),
-        "ai": config.AI_ENABLED,
+        "channels": channels.active(),
+        "ai": llm.ai_ready(),
         "model": llm.current_model(),
         "contacts": db.q1("SELECT COUNT(*) AS c FROM contacts")["c"],
         "leads": db.q1("SELECT COUNT(*) AS c FROM leads")["c"],
@@ -374,34 +380,71 @@ async def _save_upload(upload) -> str | None:
 @app.get("/settings", response_class=HTMLResponse)
 async def settings_page(request: Request):
     keys = ["business_name", "business_site", "greeting", "tone", "model",
-            "operator_chat_id", "managers", "handoff_note", "ai_enabled_global"]
+            "operator_chat_id", "managers", "handoff_note", "ai_enabled_global",
+            "sheets_kb_url", "sheets_crm_id", "sheets_crm_tab"]
     values = {key: db.setting(key, "") for key in keys}
     return page(request, "settings.html", values=values,
                 models=await llm.available_models(),
-                telegram_on=config.telegram_enabled(),
+                telegram_on=channels.telegram_enabled(),
                 whatsapp_on=config.whatsapp_enabled(),
-                ai_ready=config.AI_ENABLED, mode=config.MODE)
+                ai_ready=llm.ai_ready(),
+                key_source=_key_source(),
+                sa_file=bool(config.GOOGLE_SA_FILE),
+                mode=config.MODE)
+
+
+def _key_source() -> str:
+    """Откуда взялся ключ — чтобы владелец видел, что он вообще есть."""
+    if db.setting("openrouter_key", "").strip():
+        return "вставлен в панели"
+    if config.OPENROUTER_API_KEY:
+        return "взят из .env"
+    return ""
 
 
 @app.post("/settings")
 async def settings_save(request: Request):
     form = await request.form()
     for key in ("business_name", "business_site", "greeting", "tone", "model",
-                "operator_chat_id", "managers", "handoff_note"):
+                "operator_chat_id", "managers", "handoff_note",
+                "sheets_kb_url", "sheets_crm_id", "sheets_crm_tab"):
         if key in form:
             db.set_setting(key, str(form.get(key) or ""))
+
+    # Ключ пишем только если поле заполнили: пустое поле означает
+    # «оставить как было», иначе ключ стирался бы при каждом сохранении.
+    new_key = str(form.get("openrouter_key") or "").strip()
+    if new_key:
+        db.set_setting("openrouter_key", new_key)
+    if form.get("drop_key"):
+        db.set_setting("openrouter_key", "")
+
     db.set_setting("ai_enabled_global", "1" if form.get("ai_enabled_global") else "0")
     return RedirectResponse("/settings", status_code=303)
 
 
+@app.post("/settings/sheets/sync")
+async def sheets_sync():
+    """Синхронизировать таблицы прямо сейчас, не дожидаясь планировщика."""
+    await asyncio.to_thread(sheets.sync_knowledge)
+    await sheets.sync_leads()
+    return RedirectResponse("/settings", status_code=303)
+
+
+@app.get("/settings/sheets/check")
+async def sheets_check():
+    return JSONResponse(await sheets.check())
+
+
 # ── вебхуки ────────────────────────────────────────────────────────────
 
-@app.post("/hook/telegram")
-async def hook_telegram(request: Request):
+@app.post("/hook/telegram/{bot_id}")
+async def hook_telegram(bot_id: int, request: Request):
+    """У каждого бота свой адрес — так апдейты не путаются между ними."""
     if request.headers.get("X-Telegram-Bot-Api-Secret-Token", "") != config.WEBHOOK_SECRET:
         return JSONResponse({"ok": False}, status_code=403)
     payload = await request.json()
-    asyncio.create_task(telegram.feed(payload))
+    asyncio.create_task(telegram.feed(bot_id, payload))
     return JSONResponse({"ok": True})
 
 
@@ -419,3 +462,187 @@ async def hook_whatsapp(request: Request):
     payload = await request.json()
     asyncio.create_task(whatsapp.feed(payload))
     return JSONResponse({"ok": True})
+
+
+# ── боты ───────────────────────────────────────────────────────────────
+
+@app.get("/bots", response_class=HTMLResponse)
+async def bots_page(request: Request):
+    rows = db.bots(only_enabled=False)
+    live = set(telegram.BOTS)
+    return page(request, "bots.html", rows=rows, live=live, mode=config.MODE,
+                public_url=config.PUBLIC_URL)
+
+
+@app.post("/bots/add")
+async def bots_add(title: str = Form(""), token: str = Form(...), role: str = Form("sales")):
+    """Добавить бота по токену от BotFather. Токен проверяем до сохранения."""
+    token = token.strip()
+    probe = await telegram.check_token(token)
+    if not probe["ok"]:
+        return RedirectResponse(f"/bots?error={probe['error'][:120]}", status_code=303)
+
+    if db.q1("SELECT 1 FROM bots WHERE token = ?", (token,)):
+        return RedirectResponse("/bots?error=такой+бот+уже+добавлен", status_code=303)
+
+    db.add_bot(title.strip() or f"@{probe['username']}", token,
+               role if role in ("sales", "manager") else "sales")
+    await telegram.reload()
+    return RedirectResponse("/bots", status_code=303)
+
+
+@app.post("/bots/{bot_id}/save")
+async def bots_save(bot_id: int, title: str = Form(""), role: str = Form("sales"),
+                    greeting: str = Form(""), enabled: str = Form(""),
+                    script_enabled: str = Form("")):
+    db.run(
+        "UPDATE bots SET title = ?, role = ?, greeting = ?, enabled = ?, script_enabled = ?"
+        " WHERE id = ?",
+        (title.strip(), role, greeting.strip() or None,
+         1 if enabled else 0, 1 if script_enabled else 0, bot_id),
+    )
+    await telegram.reload()
+    return RedirectResponse("/bots", status_code=303)
+
+
+@app.post("/bots/{bot_id}/delete")
+async def bots_delete(bot_id: int):
+    db.run("DELETE FROM bots WHERE id = ?", (bot_id,))
+    await telegram.reload()
+    return RedirectResponse("/bots", status_code=303)
+
+
+@app.post("/bots/reload")
+async def bots_reload():
+    """Перечитать реестр и переставить вебхуки — без перезапуска службы."""
+    await telegram.reload()
+    return RedirectResponse("/bots", status_code=303)
+
+
+# ── лог обращений ──────────────────────────────────────────────────────
+
+@app.get("/requests", response_class=HTMLResponse)
+async def requests_page(request: Request, status: str = ""):
+    sql = (
+        "SELECT r.*, c.name, c.username, c.phone, c.channel, c.ai_enabled,"
+        " l.summary, l.status AS lead_status"
+        " FROM requests r JOIN contacts c ON c.id = r.contact_id"
+        " LEFT JOIN leads l ON l.contact_id = r.contact_id"
+    )
+    params: tuple = ()
+    if status in db.REQUEST_STATUSES:
+        sql += " WHERE r.status = ?"
+        params = (status,)
+    sql += " ORDER BY CASE r.status WHEN 'new' THEN 0 WHEN 'in_work' THEN 1 ELSE 2 END," \
+           " r.id DESC LIMIT 300"
+    managers = [m.strip() for m in db.setting("managers", "").split(",") if m.strip()]
+    return page(request, "requests.html", rows=db.q(sql, params),
+                current=status, managers=managers)
+
+
+@app.post("/requests/{request_id}/take")
+async def request_take(request_id: int, manager: str = Form("")):
+    """«Взять в работу»: ИИ замолкает, ответственный записан."""
+    row = db.take_request(request_id, manager.strip() or "менеджер")
+    if row:
+        db.set_ai(row["contact_id"], False)
+    return RedirectResponse("/requests", status_code=303)
+
+
+@app.post("/requests/{request_id}/pass")
+async def request_pass(request_id: int, manager: str = Form("")):
+    """«Передать менеджеру»: сменить ответственного или вернуть в очередь."""
+    if manager.strip():
+        db.take_request(request_id, manager.strip())
+        db.run("UPDATE requests SET manager = ? WHERE id = ?", (manager.strip(), request_id))
+    else:
+        db.run(
+            "UPDATE requests SET status = 'new', manager = NULL, taken_at = NULL"
+            " WHERE id = ?", (request_id,),
+        )
+    return RedirectResponse("/requests", status_code=303)
+
+
+@app.post("/requests/{request_id}/close")
+async def request_close(request_id: int):
+    db.close_request(request_id)
+    return RedirectResponse("/requests", status_code=303)
+
+
+@app.post("/requests/{request_id}/return-ai")
+async def request_return_ai(request_id: int):
+    row = db.q1("SELECT contact_id FROM requests WHERE id = ?", (request_id,))
+    if row:
+        sales.return_to_ai(row["contact_id"])
+    return RedirectResponse("/requests", status_code=303)
+
+
+# ── сценарий продаж ────────────────────────────────────────────────────
+
+@app.get("/script", response_class=HTMLResponse)
+async def script_page(request: Request, bot: int | None = None):
+    steps = db.q(
+        "SELECT * FROM script_steps WHERE bot_id IS ? ORDER BY position", (bot,)
+    )
+    return page(request, "script.html", steps=steps, bot_id=bot,
+                sales_bots=db.bots(role="sales", only_enabled=False),
+                fields=db.LEAD_FIELDS)
+
+
+@app.post("/script/save")
+async def script_save(request: Request):
+    """Сохранить шаги целиком: порядок, цели и что спрашивать."""
+    form = await request.form()
+    bot_id = form.get("bot_id")
+    bot_id = int(bot_id) if bot_id else None
+
+    for key in form:
+        if not key.startswith("title_"):
+            continue
+        step_id = int(key[6:])
+        title = str(form.get(f"title_{step_id}") or "").strip()
+        if not title:
+            db.run("DELETE FROM script_steps WHERE id = ?", (step_id,))
+            continue
+        db.run(
+            "UPDATE script_steps SET title = ?, goal = ?, ask_field = ?,"
+            " position = ?, enabled = ? WHERE id = ?",
+            (title,
+             str(form.get(f"goal_{step_id}") or "").strip(),
+             str(form.get(f"field_{step_id}") or "").strip(),
+             int(form.get(f"pos_{step_id}") or 0),
+             1 if form.get(f"on_{step_id}") else 0,
+             step_id),
+        )
+
+    new_title = str(form.get("new_title") or "").strip()
+    if new_title:
+        row = db.q1(
+            "SELECT COALESCE(MAX(position), -1) + 1 AS p FROM script_steps WHERE bot_id IS ?",
+            (bot_id,),
+        )
+        db.run(
+            "INSERT INTO script_steps (bot_id, position, title, goal, ask_field, enabled)"
+            " VALUES (?, ?, ?, ?, ?, 1)",
+            (bot_id, row["p"], new_title,
+             str(form.get("new_goal") or "").strip(),
+             str(form.get("new_field") or "").strip()),
+        )
+
+    target = f"/script?bot={bot_id}" if bot_id else "/script"
+    return RedirectResponse(target, status_code=303)
+
+
+@app.post("/script/copy")
+async def script_copy(bot_id: int = Form(...)):
+    """Сделать боту свой сценарий — копией общего, дальше правится отдельно."""
+    if db.q1("SELECT 1 FROM script_steps WHERE bot_id = ?", (bot_id,)):
+        return RedirectResponse(f"/script?bot={bot_id}", status_code=303)
+    for step in db.q("SELECT * FROM script_steps WHERE bot_id IS NULL ORDER BY position"):
+        db.run(
+            "INSERT INTO script_steps (bot_id, position, title, goal, ask_field, enabled)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
+            (bot_id, step["position"], step["title"], step["goal"],
+             step["ask_field"], step["enabled"]),
+        )
+    return RedirectResponse(f"/script?bot={bot_id}", status_code=303)

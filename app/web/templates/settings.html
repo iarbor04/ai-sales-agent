@@ -7,13 +7,13 @@
   <h2>Состояние подключений</h2>
   <table>
     <tr><td>Telegram</td><td class="right">
-      {% if telegram_on %}<span class="pill ok">подключён</span>
-      {% else %}<span class="pill warn">нет токена в .env</span>{% endif %}</td></tr>
+      {% if telegram_on %}<span class="pill ok">боты подключены</span>
+      {% else %}<span class="pill warn"><a href="/bots">добавьте бота</a></span>{% endif %}</td></tr>
     <tr><td>WhatsApp Business</td><td class="right">
       {% if whatsapp_on %}<span class="pill ok">подключён</span>
       {% else %}<span class="pill off">не подключён</span>{% endif %}</td></tr>
     <tr><td>Модель</td><td class="right">
-      {% if ai_ready %}<span class="pill ok">ключ OpenRouter есть</span>
+      {% if ai_ready %}<span class="pill ok">ключ есть — {{ key_source }}</span>
       {% else %}<span class="pill warn">нет ключа — агент молчит и зовёт менеджера</span>{% endif %}</td></tr>
     <tr><td>Режим приёма</td><td class="right"><span class="pill">{{ mode }}</span></td></tr>
   </table>
@@ -40,6 +40,21 @@
 
   <div class="card">
     <h2>Модель</h2>
+    <div class="field">
+      <label>Ключ OpenRouter</label>
+      <input type="password" name="openrouter_key" autocomplete="new-password"
+        placeholder="{% if ai_ready %}ключ сохранён — впишите новый, чтобы заменить{% else %}sk-or-v1-...{% endif %}">
+      <span class="muted small">
+        Взять на openrouter.ai → Keys. Сам ключ не показываем — только заменяем.
+        {% if ai_ready %}Сейчас: {{ key_source }}.{% endif %}
+      </span>
+    </div>
+    {% if ai_ready %}
+    <label class="row">
+      <input type="checkbox" name="drop_key">
+      <span>удалить сохранённый ключ</span>
+    </label>
+    {% endif %}
     <div class="field">
       <label>Модель для ответов</label>
       {% if models %}
@@ -77,6 +92,52 @@
       <textarea name="handoff_note">{{ values.handoff_note }}</textarea></div>
   </div>
 
+  <div class="card">
+    <h2>Google Таблицы</h2>
+    <div class="field">
+      <label>База знаний — ссылка на опубликованную таблицу</label>
+      <input type="text" name="sheets_kb_url" value="{{ values.sheets_kb_url }}"
+        placeholder="https://docs.google.com/spreadsheets/d/...">
+      <span class="muted small">
+        В таблице: Файл → Поделиться → Опубликовать в интернете. Каждая строка
+        станет фактом для агента: прайс, условия, частые вопросы.
+        Опубликованную таблицу видит любой по ссылке — не кладите туда личные данные.
+      </span>
+    </div>
+    <div class="row">
+      <div class="field"><label>CRM — идентификатор таблицы для лидов</label>
+        <input type="text" name="sheets_crm_id" value="{{ values.sheets_crm_id }}"
+          placeholder="1AbC...  (часть ссылки между /d/ и /edit)"></div>
+      <div class="field"><label>Лист</label>
+        <input type="text" name="sheets_crm_tab" value="{{ values.sheets_crm_tab }}"></div>
+    </div>
+    <p class="muted small">
+      Для записи лидов нужен сервисный аккаунт Google: путь к его JSON-ключу
+      в переменной <code>GOOGLE_SA_FILE</code>, а саму таблицу расшарьте на почту
+      этого аккаунта с правом редактирования.
+      {% if not sa_file %}<b>Сейчас ключ не задан — запись выключена.</b>{% endif %}
+    </p>
+    <div class="row">
+      <button class="btn ghost" type="button" onclick="checkSheets()">Проверить</button>
+    </div>
+    <pre id="sheetsout" class="out" style="display:none"></pre>
+  </div>
+
   <button class="btn" type="submit">Сохранить</button>
 </form>
+
+<form method="post" action="/settings/sheets/sync" style="margin-top:10px">
+  <button class="btn ghost" type="submit">Синхронизировать таблицы сейчас</button>
+</form>
+
+<script>
+async function checkSheets() {
+  const out = document.getElementById('sheetsout');
+  out.style.display = 'block';
+  out.textContent = 'проверяю…';
+  const resp = await fetch('/settings/sheets/check');
+  const data = await resp.json();
+  out.textContent = 'База знаний: ' + data.kb + '\nCRM: ' + data.crm;
+}
+</script>
 {% endblock %}

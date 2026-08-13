@@ -98,6 +98,12 @@ MEDIA_DIR.mkdir(parents=True, exist_ok=True)
 MODE = (_env("MODE", "polling") or "polling").lower()
 WEBHOOK_SECRET = _env("WEBHOOK_SECRET", SECRET_KEY[:32] or "webhook-secret")
 
+# ── Google Таблицы ─────────────────────────────────────────────────────
+# База знаний читается по опубликованной ссылке и ключей не требует.
+# Для записи лидов нужен сервисный аккаунт: путь к его JSON-ключу.
+GOOGLE_SA_FILE = _env("GOOGLE_SA_FILE")
+SHEETS_SYNC_MINUTES = _int("SHEETS_SYNC_MINUTES", 30)
+
 # ── база знаний ────────────────────────────────────────────────────────
 CRAWL_MAX_PAGES = _int("CRAWL_MAX_PAGES", 80)
 CRAWL_TIMEOUT = _int("CRAWL_TIMEOUT", 15)

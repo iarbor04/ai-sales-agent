@@ -28,11 +28,26 @@ ANSWER_SCHEMA = """{
   "reply": "текст ответа клиенту",
   "handoff": true или false,
   "handoff_reason": "почему нужен человек, пусто если не нужен",
+  "step_done": true или false,
   "fields": {
     "name": "", "contact": "", "product": "", "need": "", "deadline": "", "comment": ""
   },
   "summary": "1-2 предложения: что нужно клиенту и о чём договорились"
 }"""
+
+
+def api_key() -> str:
+    """Ключ из панели, а если там пусто — из .env.
+
+    Владельцу удобнее вставить ключ в Настройках, чем лезть в файл на сервере,
+    поэтому панель главнее. Ключ используется в каждом запросе заново, так что
+    его смена работает сразу, без перезапуска службы.
+    """
+    return (db.setting("openrouter_key", "").strip() or config.OPENROUTER_API_KEY).strip()
+
+
+def ai_ready() -> bool:
+    return bool(api_key())
 
 
 def current_model() -> str:
@@ -41,13 +56,13 @@ def current_model() -> str:
 
 async def available_models() -> list[dict]:
     """Список моделей OpenRouter для выпадающего списка в Настройках."""
-    if not config.AI_ENABLED:
+    if not ai_ready():
         return []
     try:
         async with httpx.AsyncClient(timeout=20) as client:
             resp = await client.get(
                 MODELS_URL,
-                headers={"Authorization": f"Bearer {config.OPENROUTER_API_KEY}"},
+                headers={"Authorization": f"Bearer {api_key()}"},
             )
             resp.raise_for_status()
             data = resp.json().get("data", [])
@@ -65,7 +80,8 @@ async def available_models() -> list[dict]:
 
 
 async def _call(system: str, user: str, max_tokens: int = 900) -> str:
-    if not config.AI_ENABLED:
+    key = api_key()
+    if not key:
         return ""
     payload = {
         "model": current_model(),
@@ -80,7 +96,7 @@ async def _call(system: str, user: str, max_tokens: int = 900) -> str:
             resp = await client.post(
                 API_URL,
                 headers={
-                    "Authorization": f"Bearer {config.OPENROUTER_API_KEY}",
+                    "Authorization": f"Bearer {key}",
                     "Content-Type": "application/json",
                 },
                 json=payload,
@@ -110,6 +126,38 @@ def _parse(raw: str) -> dict | None:
     except json.JSONDecodeError:
         log.warning("модель вернула не-JSON: %s", text[:200])
         return None
+
+
+def _script_block(contact_id: int) -> str:
+    """Текущий шаг сценария — цель, к которой агент ведёт разговор.
+
+    Сценарий не превращает бота в анкету: модель получает цель шага и сама
+    решает, как её достичь и достигнута ли она. Порядок шагов задаёт владелец
+    в панели, раздел «Сценарий».
+    """
+    contact = db.contact_by_id(contact_id)
+    if contact is None:
+        return ""
+    row = db.bot(contact["bot_id"]) if contact["bot_id"] else None
+    if row is not None and not row["script_enabled"]:
+        return ""
+
+    steps = db.script(contact["bot_id"])
+    if not steps:
+        return ""
+
+    index = min(contact["step"], len(steps) - 1)
+    step = steps[index]
+    plan = " → ".join(s["title"] for s in steps)
+
+    return (
+        f"\n\nСЦЕНАРИЙ РАЗГОВОРА: {plan}\n"
+        f"Сейчас шаг {index + 1} из {len(steps)} — «{step['title']}».\n"
+        f"Цель шага: {step['goal'] or step['title']}\n"
+        "Веди разговор к цели этого шага. Как только она достигнута, поставь "
+        "step_done = true — тогда следующим сообщением пойдёт следующий шаг. "
+        "Не перескакивай вперёд и не возвращайся назад без нужды."
+    )
 
 
 def _system_prompt() -> str:
@@ -167,10 +215,11 @@ async def answer(contact_id: int, question: str) -> dict:
         "reply": "",
         "handoff": True,
         "handoff_reason": "модель недоступна",
+        "step_done": False,
         "fields": {},
         "summary": "",
     }
-    if not config.AI_ENABLED:
+    if not ai_ready():
         return fallback
 
     context = retrieval.context_for(question)
@@ -195,7 +244,7 @@ async def answer(contact_id: int, question: str) -> dict:
         + f"\n\nПоследнее сообщение клиента: {question}\n\nОтветь JSON-объектом."
     )
 
-    data = _parse(await _call(_system_prompt(), user))
+    data = _parse(await _call(_system_prompt() + _script_block(contact_id), user))
     if not data:
         return fallback
 
@@ -209,6 +258,7 @@ async def answer(contact_id: int, question: str) -> dict:
         "reply": reply,
         "handoff": bool(data.get("handoff")),
         "handoff_reason": str(data.get("handoff_reason") or "").strip(),
+        "step_done": bool(data.get("step_done")),
         "fields": fields if isinstance(fields, dict) else {},
         "summary": str(data.get("summary") or "").strip(),
     }

@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}Сценарий · ИИ-продажник{% endblock %}
+{% block body %}
+<div class="topbar">
+  <h1>Сценарий продаж</h1>
+  <div class="botswitch">
+    <a href="/script" class="{{ 'on' if not bot_id }}">общий</a>
+    {% for b in sales_bots %}
+    <a href="/script?bot={{ b.id }}" class="{{ 'on' if bot_id == b.id }}">{{ b.title }}</a>
+    {% endfor %}
+  </div>
+</div>
+
+<div class="card">
+  <p class="muted small" style="margin:0">
+    Шаги — это не анкета. Агент получает цель текущего шага и сам решает, как её
+    достичь и когда шаг закрыт: клиент может ответить на два вопроса сразу или
+    задать свой — сценарий это выдержит. Порядок задаёт колонка «№».
+    Чтобы бот пошёл по сценарию, включите галочку у него в разделе
+    <a href="/bots">Боты</a>.
+  </p>
+</div>
+
+{% if bot_id and not steps %}
+<div class="card warn">
+  У этого бота нет своего сценария — он идёт по общему.
+  <form method="post" action="/script/copy" style="margin-top:10px">
+    <input type="hidden" name="bot_id" value="{{ bot_id }}">
+    <button class="btn small">Сделать свой — копией общего</button>
+  </form>
+</div>
+{% endif %}
+
+<form method="post" action="/script/save">
+  <input type="hidden" name="bot_id" value="{{ bot_id or '' }}">
+  <div class="card">
+    <table>
+      <tr>
+        <th style="width:50px">№</th>
+        <th style="width:180px">Шаг</th>
+        <th>Цель — что агент должен выяснить или сделать</th>
+        <th style="width:130px">Поле лида</th>
+        <th style="width:60px">Вкл</th>
+      </tr>
+      {% for s in steps %}
+      <tr>
+        <td><input type="number" name="pos_{{ s.id }}" value="{{ s.position }}"></td>
+        <td><input type="text" name="title_{{ s.id }}" value="{{ s.title }}"></td>
+        <td><input type="text" name="goal_{{ s.id }}" value="{{ s.goal or '' }}"></td>
+        <td>
+          <select name="field_{{ s.id }}">
+            <option value="">—</option>
+            {% for f in fields %}
+            <option value="{{ f }}" {{ 'selected' if s.ask_field == f }}>{{ f }}</option>
+            {% endfor %}
+          </select>
+        </td>
+        <td><input type="checkbox" name="on_{{ s.id }}" {{ 'checked' if s.enabled }}></td>
+      </tr>
+      {% endfor %}
+      <tr>
+        <td class="muted small">нов.</td>
+        <td><input type="text" name="new_title" placeholder="новый шаг"></td>
+        <td><input type="text" name="new_goal" placeholder="что выяснить"></td>
+        <td>
+          <select name="new_field">
+            <option value="">—</option>
+            {% for f in fields %}<option value="{{ f }}">{{ f }}</option>{% endfor %}
+          </select>
+        </td>
+        <td></td>
+      </tr>
+    </table>
+    <div class="row between" style="margin-top:12px">
+      <span class="muted small">Пустое название удаляет шаг.</span>
+      <button class="btn" type="submit">Сохранить сценарий</button>
+    </div>
+  </div>
+</form>
+{% endblock %}

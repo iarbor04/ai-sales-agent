@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% block title %}Боты · ИИ-продажник{% endblock %}
+{% block body %}
+<div class="topbar">
+  <h1>Боты</h1>
+  <form method="post" action="/bots/reload">
+    <button class="btn ghost small">Переподключить всех</button>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Добавить бота</h2>
+  <form method="post" action="/bots/add">
+    <div class="row">
+      <div class="field"><label>Название</label>
+        <input type="text" name="title" placeholder="Продажник"></div>
+      <div class="field"><label>Токен от @BotFather</label>
+        <input type="text" name="token" placeholder="123456:AA..." required></div>
+      <div class="field"><label>Роль</label>
+        <select name="role">
+          <option value="sales">Продажник — говорит с клиентами</option>
+          <option value="manager">Менеджерский — уведомления и кнопки</option>
+        </select></div>
+    </div>
+    <div class="row between">
+      <span class="muted small">Токен проверяется до сохранения: неживой не добавится.</span>
+      <button class="btn" type="submit">Добавить</button>
+    </div>
+  </form>
+</div>
+
+{% for b in rows %}
+<div class="card">
+  <form method="post" action="/bots/{{ b.id }}/save">
+    <div class="row between">
+      <h2 style="margin:0">
+        {{ b.title }}
+        {% if b.username %}<span class="muted small">@{{ b.username }}</span>{% endif %}
+      </h2>
+      <div>
+        {% if b.id in live %}<span class="pill ok">на связи</span>
+        {% elif not b.enabled %}<span class="pill off">выключен</span>
+        {% else %}<span class="pill warn">не поднялся</span>{% endif %}
+      </div>
+    </div>
+
+    {% if b.last_error %}
+    <p class="small" style="color:var(--danger)">Ошибка: {{ b.last_error }}</p>
+    {% endif %}
+
+    <div class="row">
+      <div class="field"><label>Название</label>
+        <input type="text" name="title" value="{{ b.title }}"></div>
+      <div class="field"><label>Роль</label>
+        <select name="role">
+          <option value="sales" {{ 'selected' if b.role == 'sales' }}>Продажник</option>
+          <option value="manager" {{ 'selected' if b.role == 'manager' }}>Менеджерский</option>
+        </select></div>
+    </div>
+
+    {% if b.role == 'sales' %}
+    <div class="field"><label>Приветствие на /start (пусто — общее из Настроек)</label>
+      <textarea name="greeting">{{ b.greeting or '' }}</textarea></div>
+    <label class="row">
+      <input type="checkbox" name="script_enabled" {{ 'checked' if b.script_enabled }}>
+      <span>вести по сценарию продаж</span>
+    </label>
+    <p class="muted small">
+      Без галочки бот отвечает свободно по базе знаний.
+      С галочкой — идёт по шагам из раздела
+      <a href="/script?bot={{ b.id }}">Сценарий</a>.
+    </p>
+    {% else %}
+    <p class="muted small">
+      Служебный бот. Напишите ему /start, он пришлёт Chat ID — впишите его
+      в Настройки, туда пойдут уведомления с кнопками.
+    </p>
+    {% endif %}
+
+    <label class="row">
+      <input type="checkbox" name="enabled" {{ 'checked' if b.enabled }}>
+      <span>включён</span>
+    </label>
+
+    {% if mode == 'webhook' %}
+    <p class="muted small">Вебхук: <code>{{ public_url }}/hook/telegram/{{ b.id }}</code></p>
+    {% endif %}
+
+    <div class="row between" style="margin-top:10px">
+      <button class="btn" type="submit">Сохранить</button>
+    </div>
+  </form>
+  <form method="post" action="/bots/{{ b.id }}/delete"
+        onsubmit="return confirm('Удалить бота {{ b.title }}? Переписка сохранится.')">
+    <button class="btn ghost small" type="submit">Удалить</button>
+  </form>
+</div>
+{% else %}
+<div class="card warn">
+  <b>Ботов пока нет.</b> Создайте бота у @BotFather, скопируйте токен
+  и добавьте его выше. Без бота клиенты не смогут написать.
+</div>
+{% endfor %}
+{% endblock %}

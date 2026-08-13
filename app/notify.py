@@ -16,12 +16,16 @@ def _chat_id() -> str:
     return db.setting("operator_chat_id", "").strip()
 
 
-async def _push(text: str) -> None:
+async def _push(text: str, markup=None) -> None:
+    """Уведомление менеджерам. Шлём служебным ботом, если он заведён."""
     chat = _chat_id()
-    if not chat or not config.telegram_enabled():
+    if not chat:
         return
     from .channels import telegram
-    await telegram.send(chat, text)
+    manager = db.manager_bot()
+    if manager is None:
+        return
+    await telegram.send(chat, text, bot_id=manager["id"], markup=markup)
 
 
 def _who(contact) -> str:
@@ -30,7 +34,8 @@ def _who(contact) -> str:
     return f"{name} ({channel})"
 
 
-async def handed_off(contact_id: int, reason: str, manager: str = "") -> None:
+async def handed_off(contact_id: int, reason: str, manager: str = "",
+                     request_id: int | None = None) -> None:
     contact = db.contact_by_id(contact_id)
     if contact is None:
         return
@@ -47,7 +52,13 @@ async def handed_off(contact_id: int, reason: str, manager: str = "") -> None:
     if lead and lead["summary"]:
         lines.append(f"Суть: {lead['summary']}")
     lines.append(f'<a href="{link}">Открыть диалог</a>')
-    await _push("\n".join(lines))
+
+    # кнопки «Взять в работу» / «Передать» прямо под уведомлением
+    markup = None
+    if request_id:
+        from .channels.telegram import request_markup
+        markup = request_markup(request_id)
+    await _push("\n".join(lines), markup=markup)
 
 
 async def new_message(contact_id: int, preview: str) -> None:

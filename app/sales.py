@@ -84,6 +84,10 @@ async def handle_incoming(contact_id: int, text: str, media_type: str | None = N
         await hand_off(contact_id, f"сообщение не доставлено ({status})", silent=True)
         return
 
+    # шаг сценария закрыт — следующее сообщение пойдёт по следующему шагу
+    if result.get("step_done"):
+        db.advance_step(contact_id)
+
     _bump_status(contact_id)
 
 
@@ -139,13 +143,16 @@ async def hand_off(contact_id: int, reason: str, summary: str = "",
     db.run("UPDATE contacts SET manager = ? WHERE id = ?", (manager or None, contact_id))
     db.add_message(contact_id, "out", "system", f"Передано менеджеру: {reason}", is_read=True)
 
+    # обращение в лог: отсюда кнопки «взять в работу» и «передать»
+    request_id = db.open_request(contact_id, reason)
+
     # silent — когда отправка клиенту уже не удалась, второй раз не пробуем
     if not silent:
         note = db.setting("handoff_note", "").strip()
         if note:
             await base.send(contact_id, note, author="ai")
 
-    asyncio.create_task(notify.handed_off(contact_id, reason, manager))
+    asyncio.create_task(notify.handed_off(contact_id, reason, manager, request_id))
 
 
 def return_to_ai(contact_id: int) -> None:
@@ -159,3 +166,12 @@ def return_to_ai(contact_id: int) -> None:
     lead = db.get_lead(contact_id)
     if lead and lead["status"] == "handed":
         db.set_lead_status(contact_id, "qualifying")
+
+    # открытое обращение закрываем: человек больше не нужен
+    row = db.q1(
+        "SELECT id FROM requests WHERE contact_id = ? AND status != 'closed'"
+        " ORDER BY id DESC LIMIT 1",
+        (contact_id,),
+    )
+    if row:
+        db.close_request(row["id"])

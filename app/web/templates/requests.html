@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}Обращения · ИИ-продажник{% endblock %}
+{% block body %}
+<div class="topbar">
+  <h1>Обращения</h1>
+  <div class="botswitch">
+    <a href="/requests" class="{{ 'on' if not current }}">все</a>
+    {% for key, label in req_statuses.items() %}
+    <a href="/requests?status={{ key }}" class="{{ 'on' if current == key }}">{{ label }}</a>
+    {% endfor %}
+  </div>
+</div>
+
+<div class="card">
+  {% if rows %}
+  <table>
+    <tr>
+      <th>#</th><th>Клиент</th><th>Причина</th><th>Суть</th>
+      <th>Статус</th><th>Ответственный</th><th>Когда</th><th>Действия</th>
+    </tr>
+    {% for r in rows %}
+    <tr>
+      <td class="small muted">{{ r.id }}</td>
+      <td>
+        <a href="/dialogs?c={{ r.contact_id }}">{{ r.name or r.username or r.phone or 'id' ~ r.contact_id }}</a>
+        <div class="small muted">{{ channels.get(r.channel, r.channel) }}</div>
+      </td>
+      <td class="small">{{ r.reason | short(50) }}</td>
+      <td class="small muted">{{ r.summary | short(60) }}</td>
+      <td>
+        {% if r.status == 'new' %}<span class="pill warn">Новое</span>
+        {% elif r.status == 'in_work' %}<span class="pill ok">В работе</span>
+        {% else %}<span class="pill off">Закрыто</span>{% endif %}
+      </td>
+      <td class="small">{{ r.manager or '—' }}</td>
+      <td class="small muted">{{ r.created_at | dt }}</td>
+      <td>
+        {% if r.status == 'new' %}
+        <form method="post" action="/requests/{{ r.id }}/take" class="row">
+          <select name="manager" style="width:auto">
+            <option value="">я</option>
+            {% for m in managers %}<option value="{{ m }}">{{ m }}</option>{% endfor %}
+          </select>
+          <button class="btn small">Взять в работу</button>
+        </form>
+        {% elif r.status == 'in_work' %}
+        <div class="row">
+          <form method="post" action="/requests/{{ r.id }}/pass" class="row">
+            <select name="manager" style="width:auto">
+              <option value="">в очередь</option>
+              {% for m in managers %}<option value="{{ m }}">{{ m }}</option>{% endfor %}
+            </select>
+            <button class="btn ghost small">Передать</button>
+          </form>
+          <form method="post" action="/requests/{{ r.id }}/close">
+            <button class="btn ghost small">Закрыть</button>
+          </form>
+          <form method="post" action="/requests/{{ r.id }}/return-ai">
+            <button class="btn ghost small">Вернуть ИИ</button>
+          </form>
+        </div>
+        {% else %}
+        <span class="muted small">—</span>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  <p class="muted small">
+    Те же кнопки приходят менеджерам в Telegram — обращение можно взять,
+    не открывая панель.
+  </p>
+  {% else %}
+  <p class="muted">
+    Обращений нет. Они появляются сами, когда агент решает, что нужен человек:
+    клиент попросил менеджера, готов покупать, жалуется или задал вопрос,
+    ответа на который нет в базе знаний.
+  </p>
+  {% endif %}
+</div>
+{% endblock %}

@@ -8,16 +8,35 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from . import broadcast, config, db
+from . import broadcast, config, db, sheets
 
 log = logging.getLogger("scheduler")
 
 _task: asyncio.Task | None = None
+_last_sheets_sync = 0
 
 
 async def _tick() -> None:
     await broadcast.due()
+    await _sync_sheets()
     await _retry_pending()
+
+
+async def _sync_sheets() -> None:
+    """Обмен с Google Таблицами: лиды туда, база знаний оттуда.
+
+    Лиды выгружаем каждый тик — их мало и они важны сразу. Базу знаний
+    перечитываем реже: она меняется редко, а запрос не бесплатный.
+    """
+    global _last_sheets_sync
+
+    if sheets.crm_ready():
+        await sheets.sync_leads()
+
+    period = config.SHEETS_SYNC_MINUTES * 60
+    if db.setting("sheets_kb_url", "").strip() and db.now() - _last_sheets_sync > period:
+        _last_sheets_sync = db.now()
+        await asyncio.to_thread(sheets.sync_knowledge)
 
 
 async def _retry_pending() -> None:

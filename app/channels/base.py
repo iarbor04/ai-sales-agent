@@ -31,7 +31,10 @@ async def send(contact_id: int, text: str, image_path: str | None = None,
     channel = contact["channel"]
     if channel == "tg":
         from . import telegram
-        ok, status = await telegram.send(contact["external_id"], text, image_path, button)
+        # отвечаем тем же ботом, которому человек написал
+        ok, status = await telegram.send(
+            contact["external_id"], text, image_path, button, bot_id=contact["bot_id"]
+        )
     elif channel == "wa":
         from . import whatsapp
         ok, status = await whatsapp.send(contact["external_id"], text, image_path, button)

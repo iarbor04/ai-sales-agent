@@ -15,9 +15,14 @@
       <a href="/dialogs" class="{{ 'active' if path.startswith('/dialogs') }}">
         Диалоги {% if unread %}<span class="badge">{{ unread }}</span>{% endif %}
       </a>
+      <a href="/requests" class="{{ 'active' if path.startswith('/requests') }}">
+        Обращения {% if open_requests %}<span class="badge">{{ open_requests }}</span>{% endif %}
+      </a>
       <a href="/leads" class="{{ 'active' if path.startswith('/leads') }}">Лиды</a>
       <a href="/knowledge" class="{{ 'active' if path.startswith('/knowledge') }}">База знаний</a>
       <a href="/broadcast" class="{{ 'active' if path.startswith('/broadcast') }}">Рассылки</a>
+      <a href="/bots" class="{{ 'active' if path.startswith('/bots') }}">Боты</a>
+      <a href="/script" class="{{ 'active' if path.startswith('/script') }}">Сценарий</a>
       <a href="/settings" class="{{ 'active' if path.startswith('/settings') }}">Настройки</a>
       <a href="/logout" class="muted">Выйти</a>
     </nav>
