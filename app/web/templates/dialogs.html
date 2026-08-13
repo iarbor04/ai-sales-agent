@@ -1,144 +1,262 @@
 {% extends "base.html" %}
 {% block title %}Диалоги · ИИ-продажник{% endblock %}
+
+{% macro avatar(name, seed, size='') %}
+<span class="ava {{ size }}" style="--h: {{ seed | hue }}">{{ name | initials }}</span>
+{% endmacro %}
+
 {% block body %}
-<div class="topbar"><h1>Диалоги</h1></div>
+<div class="messenger">
 
-<div class="chat">
-  <div class="card people">
-    {% for p in people %}
-    <a href="/dialogs?c={{ p.id }}" class="{{ 'on' if active and active.id == p.id }}">
-      <b>{{ p.name or p.username or p.phone or 'id' ~ p.id }}</b>
-      {% if p.unread %}<span class="badge">{{ p.unread }}</span>{% endif %}
-      <div class="small muted">
-        {{ channels.get(p.channel, p.channel) }}
-        {% if not p.ai_enabled %} · у менеджера{% endif %}
-      </div>
-      <div class="small muted">{{ p.last | short(40) }}</div>
-    </a>
-    {% else %}
-    <p class="muted small">Диалогов пока нет.</p>
-    {% endfor %}
-  </div>
-
-  <div>
-    {% if active %}
-    <div class="card">
-      <div class="row between">
-        <div>
-          <b>{{ active.name or active.username or active.phone or 'id' ~ active.id }}</b>
-          <span class="pill">{{ channels.get(active.channel, active.channel) }}</span>
-          {% if active.ai_enabled %}
-            <span class="pill ok">отвечает ИИ</span>
-          {% else %}
-            <span class="pill warn">ведёт менеджер{% if active.manager %}: {{ active.manager }}{% endif %}</span>
-          {% endif %}
-        </div>
-        <div class="row">
-          {% if active.ai_enabled %}
-          <form method="post" action="/dialogs/{{ active.id }}/take">
-            <input type="hidden" name="manager" value="">
-            <button class="btn ghost small">Забрать диалог</button>
-          </form>
-          {% else %}
-          <form method="post" action="/dialogs/{{ active.id }}/return-ai">
-            <button class="btn small">Вернуть ИИ</button>
-          </form>
-          {% endif %}
-        </div>
-      </div>
+  <!-- список диалогов -->
+  <aside class="mcol people">
+    <div class="mhead">
+      <b>Диалоги</b>
+      {% if unread %}<span class="badge">{{ unread }}</span>{% endif %}
     </div>
-
-    <div class="card">
-      <div class="thread" id="thread">
-        {% for m in thread %}
-          {% if m.author == 'system' %}
-            <div class="sysmsg">{{ m.text }}</div>
-          {% else %}
-            <div class="msg {{ 'out' if m.direction == 'out' }}">
-              {% if m.text %}{{ m.text }}{% endif %}
-              {% if m.media_path %}
-                {% if m.media_type == 'photo' %}
-                  <img src="/media/{{ m.media_path }}" alt="">
-                {% else %}
-                  <a href="/media/{{ m.media_path }}">вложение ({{ m.media_type }})</a>
-                {% endif %}
-              {% endif %}
-              <div class="meta">
-                {% if m.author == 'ai' %}ИИ{% elif m.author == 'manager' %}менеджер
-                {% elif m.author == 'broadcast' %}рассылка{% else %}клиент{% endif %}
-                · {{ m.created_at | dt }}
-              </div>
-            </div>
-          {% endif %}
-        {% endfor %}
-      </div>
-
-      <form method="post" action="/dialogs/{{ active.id }}/reply">
-        <div class="field">
-          <textarea name="text" placeholder="Ответ клиенту — уйдёт к нему в {{ channels.get(active.channel, active.channel) }}"></textarea>
-        </div>
-        <div class="row between">
-          <span class="muted small">Ответ менеджера выключает ИИ в этом диалоге.</span>
-          <button class="btn" type="submit">Отправить</button>
-        </div>
-      </form>
-    </div>
-
-    <div class="card">
-      <h2>Карточка лида</h2>
-      <form method="post" action="/leads/{{ active.id }}/save">
-        <div class="row">
-          <div class="field"><label>Имя</label>
-            <input type="text" name="name" value="{{ lead.name if lead else '' }}"></div>
-          <div class="field"><label>Контакт</label>
-            <input type="text" name="contact" value="{{ lead.contact if lead else '' }}"></div>
-        </div>
-        <div class="row">
-          <div class="field"><label>Продукт или услуга</label>
-            <input type="text" name="product" value="{{ lead.product if lead else '' }}"></div>
-          <div class="field"><label>Срок</label>
-            <input type="text" name="deadline" value="{{ lead.deadline if lead else '' }}"></div>
-        </div>
-        <div class="field"><label>Потребность</label>
-          <input type="text" name="need" value="{{ lead.need if lead else '' }}"></div>
-        <div class="field"><label>Комментарий</label>
-          <textarea name="comment">{{ lead.comment if lead else '' }}</textarea></div>
-        <div class="field"><label>Резюме разговора</label>
-          <textarea name="summary">{{ lead.summary if lead else '' }}</textarea></div>
-        <div class="row between">
-          <span class="muted small">
-            {% if lead %}Статус: {{ statuses[lead.status] }}{% else %}Карточка ещё не заведена{% endif %}
+    <div class="mscroll">
+      {% for p in people %}
+      {% set title = p.name or p.username or p.phone or 'id' ~ p.id %}
+      <a href="/dialogs?c={{ p.id }}" class="prow {{ 'on' if active and active.id == p.id }}">
+        {{ avatar(title, p.id) }}
+        <span class="pbody">
+          <span class="ptop">
+            <span class="pname">{{ title }}</span>
+            <span class="ptime">{{ p.last_msg_at | time }}</span>
           </span>
-          <button class="btn" type="submit">Сохранить</button>
-        </div>
-      </form>
+          <span class="pbottom">
+            <span class="plast">{{ p.last | short(34) or '—' }}</span>
+            {% if p.unread %}<span class="badge">{{ p.unread }}</span>
+            {% elif not p.ai_enabled %}<span class="dotmark" title="ведёт менеджер"></span>{% endif %}
+          </span>
+        </span>
+      </a>
+      {% else %}
+      <div class="empty">
+        <div class="big">Диалогов нет</div>
+        <p class="muted small">Напишите своему боту в Telegram — переписка появится здесь.</p>
+      </div>
+      {% endfor %}
+    </div>
+  </aside>
 
-      {% if lead %}
-      <form method="post" action="/leads/{{ active.id }}/status" class="row" style="margin-top:10px">
-        <select name="status">
-          {% for key, label in statuses.items() %}
-          <option value="{{ key }}" {{ 'selected' if lead.status == key }}>{{ label }}</option>
-          {% endfor %}
-        </select>
-        <button class="btn ghost small">Сменить статус</button>
-      </form>
+  <!-- переписка -->
+  <section class="mcol convo">
+    {% if active %}
+    {% set title = active.name or active.username or active.phone or 'id' ~ active.id %}
+    <div class="mhead">
+      {{ avatar(title, active.id) }}
+      <div class="chead">
+        <b>{{ title }}</b>
+        <span class="small muted">
+          {{ channels.get(active.channel, active.channel) }}
+          {% if active.username %} · @{{ active.username }}{% endif %}
+          {% if active.phone %} · {{ active.phone }}{% endif %}
+        </span>
+      </div>
+      {% if active.ai_enabled %}
+        <span class="pill ok">отвечает ИИ</span>
+        <form method="post" action="/dialogs/{{ active.id }}/take">
+          <input type="hidden" name="manager" value="">
+          <button class="btn ghost small">Забрать себе</button>
+        </form>
+      {% else %}
+        <span class="pill warn">{{ active.manager or 'ведёт менеджер' }}</span>
+        <form method="post" action="/dialogs/{{ active.id }}/return-ai">
+          <button class="btn small">Вернуть ИИ</button>
+        </form>
       {% endif %}
     </div>
 
-    <script>
-      // держим ленту прокрученной вниз и подтягиваем новые сообщения
-      const box = document.getElementById('thread');
-      if (box) box.scrollTop = box.scrollHeight;
-      let last = {{ thread[-1].id if thread else 0 }};
-      setInterval(async () => {
-        const resp = await fetch('/api/dialogs/{{ active.id }}/messages?after=' + last);
-        const rows = await resp.json();
-        if (rows.length) location.reload();
-      }, 12000);
-    </script>
+    <div class="mscroll thread" id="thread">
+      {% set ns = namespace(day='', author='') %}
+      {% for m in thread %}
+        {% if (m.created_at | day) != ns.day %}
+          {% set ns.day = m.created_at | day %}
+          {% set ns.author = '' %}
+          <div class="daysep"><span>{{ ns.day }}</span></div>
+        {% endif %}
+
+        {% if m.author == 'system' %}
+          <div class="sysmsg">{{ m.text }}</div>
+          {% set ns.author = '' %}
+        {% else %}
+          <div class="bubble {{ 'out' if m.direction == 'out' }}{{ ' cont' if ns.author == m.author }}">
+            {% if ns.author != m.author %}
+            <div class="who">
+              {% if m.author == 'ai' %}Агент
+              {% elif m.author == 'manager' %}Менеджер
+              {% elif m.author == 'broadcast' %}Рассылка
+              {% else %}{{ title }}{% endif %}
+            </div>
+            {% endif %}
+            {% if m.text %}<div class="txt">{{ m.text }}</div>{% endif %}
+            {% if m.media_path %}
+              {% if m.media_type == 'photo' or m.media_type == 'sticker' %}
+                <img src="/media/{{ m.media_path }}" alt="" class="shot"
+                     onclick="zoom(this.src)">
+              {% elif m.media_type in ('voice', 'audio') %}
+                <audio controls preload="none" src="/media/{{ m.media_path }}"></audio>
+                <a href="/media/{{ m.media_path }}" download class="file small">скачать</a>
+              {% elif m.media_type in ('video', 'video_note', 'animation') %}
+                <video controls preload="metadata" src="/media/{{ m.media_path }}"></video>
+              {% else %}
+                <a href="/media/{{ m.media_path }}" class="file" target="_blank">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                    <path d="M14 2v6h6"/></svg>
+                  {{ m.media_type or 'файл' }}
+                </a>
+              {% endif %}
+            {% endif %}
+            <span class="tm">{{ m.created_at | time }}</span>
+          </div>
+          {% set ns.author = m.author %}
+        {% endif %}
+      {% else %}
+        <div class="empty"><p class="muted">Сообщений пока нет.</p></div>
+      {% endfor %}
+    </div>
+
+    <form method="post" action="/dialogs/{{ active.id }}/reply" class="composer" id="composer"
+          enctype="multipart/form-data">
+      <label class="clip" title="Прикрепить файл">
+        <input type="file" name="file" id="fileinput" onchange="showPick()"
+               accept="image/*,audio/*,video/*,.pdf,.doc,.docx,.xls,.xlsx,.zip">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+             stroke-linecap="round">
+          <path d="M21.4 11.05 12.25 20.2a6 6 0 0 1-8.49-8.49l9.2-9.19a4 4 0 0 1 5.65 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
+        </svg>
+      </label>
+      <textarea name="text" id="msgbox" rows="1" placeholder="Написать клиенту…"></textarea>
+      <button class="btn" type="submit" title="Отправить">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+             stroke-linecap="round" stroke-linejoin="round">
+          <path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4 20-7z"/>
+        </svg>
+      </button>
+    </form>
+    <div class="picked" id="picked" style="display:none">
+      <span id="pickname"></span>
+      <button type="button" onclick="clearPick()">убрать</button>
+    </div>
+    <div class="chint">
+      Enter — отправить, Shift+Enter — новая строка.
+      Ваш ответ выключает ИИ в этом диалоге.
+    </div>
+
     {% else %}
-    <div class="card"><p class="muted">Выберите диалог слева.</p></div>
+    <div class="empty" style="margin:auto">
+      <div class="big">Выберите диалог</div>
+      <p class="muted">Слева список тех, кто вам написал.</p>
+    </div>
     {% endif %}
-  </div>
+  </section>
+
+  <!-- карточка лида -->
+  {% if active %}
+  <aside class="mcol info">
+    <div class="mhead"><b>Карточка лида</b>
+      {% if lead %}<span class="pill {{ 'warn' if lead.status == 'handed' else 'ok' }}">
+        {{ statuses[lead.status] }}</span>{% endif %}
+    </div>
+    <div class="mscroll" style="padding:14px">
+      <form method="post" action="/leads/{{ active.id }}/save">
+        <div class="field"><label>Имя</label>
+          <input type="text" name="name" value="{{ (lead.name if lead else '') or '' }}"></div>
+        <div class="field"><label>Контакт</label>
+          <input type="text" name="contact" value="{{ (lead.contact if lead else '') or '' }}"></div>
+        <div class="field"><label>Продукт или услуга</label>
+          <input type="text" name="product" value="{{ (lead.product if lead else '') or '' }}"></div>
+        <div class="field"><label>Потребность</label>
+          <input type="text" name="need" value="{{ (lead.need if lead else '') or '' }}"></div>
+        <div class="field"><label>Срок</label>
+          <input type="text" name="deadline" value="{{ (lead.deadline if lead else '') or '' }}"></div>
+        <div class="field"><label>Комментарий</label>
+          <textarea name="comment" style="min-height:60px">{{ (lead.comment if lead else '') or '' }}</textarea></div>
+        <div class="field"><label>Резюме разговора</label>
+          <textarea name="summary" style="min-height:70px">{{ (lead.summary if lead else '') or '' }}</textarea></div>
+        <button class="btn block" type="submit">Сохранить</button>
+      </form>
+
+      {% if lead %}
+      <form method="post" action="/leads/{{ active.id }}/status" style="margin-top:12px">
+        <label>Этап</label>
+        <div class="row tight">
+          <select name="status" style="flex:1">
+            {% for key, label in statuses.items() %}
+            <option value="{{ key }}" {{ 'selected' if lead.status == key }}>{{ label }}</option>
+            {% endfor %}
+          </select>
+          <button class="btn ghost small">Сменить</button>
+        </div>
+      </form>
+      {% else %}
+      <p class="dim small" style="margin-top:12px">
+        Карточка заведётся сама, когда агент узнает о клиенте хотя бы пару вещей.
+        Можно заполнить и вручную.
+      </p>
+      {% endif %}
+    </div>
+  </aside>
+  {% endif %}
 </div>
+
+{% if active %}
+<div class="lightbox" id="lightbox" onclick="this.style.display='none'">
+  <img id="lightimg" alt="">
+</div>
+
+<script>
+const thread = document.getElementById('thread');
+const box = document.getElementById('msgbox');
+const composer = document.getElementById('composer');
+const fileinput = document.getElementById('fileinput');
+
+// лента всегда внизу, как в мессенджере
+if (thread) thread.scrollTop = thread.scrollHeight;
+
+// поле растёт под текст, Enter отправляет
+box.addEventListener('input', () => {
+  box.style.height = 'auto';
+  box.style.height = Math.min(box.scrollHeight, 160) + 'px';
+});
+box.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    if (box.value.trim() || fileinput.files.length) composer.submit();
+  }
+});
+box.focus();
+
+function showPick() {
+  const f = fileinput.files[0];
+  const bar = document.getElementById('picked');
+  if (!f) { bar.style.display = 'none'; return; }
+  document.getElementById('pickname').textContent =
+    f.name + ' · ' + Math.round(f.size / 1024) + ' КБ';
+  bar.style.display = 'flex';
+}
+function clearPick() {
+  fileinput.value = '';
+  document.getElementById('picked').style.display = 'none';
+}
+
+function zoom(src) {
+  document.getElementById('lightimg').src = src;
+  document.getElementById('lightbox').style.display = 'flex';
+}
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') document.getElementById('lightbox').style.display = 'none';
+});
+
+// проверяем, не написал ли клиент, пока менеджер думает
+let lastId = {{ thread[-1].id if thread else 0 }};
+setInterval(async () => {
+  const resp = await fetch('/api/dialogs/{{ active.id }}/messages?after=' + lastId);
+  const rows = await resp.json();
+  if (rows.length) location.reload();
+}, 10000);
+</script>
+{% endif %}
 {% endblock %}

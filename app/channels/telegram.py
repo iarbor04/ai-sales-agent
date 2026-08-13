@@ -58,10 +58,11 @@ def _markup(button: tuple[str, str] | None) -> InlineKeyboardMarkup | None:
     )
 
 
-async def send(chat_id: str, text: str, image_path: str | None = None,
+async def send(chat_id: str, text: str, media_path: str | None = None,
                button: tuple[str, str] | None = None,
                bot_id: int | None = None,
-               markup: InlineKeyboardMarkup | None = None) -> tuple[bool, str]:
+               markup: InlineKeyboardMarkup | None = None,
+               kind: str | None = None) -> tuple[bool, str]:
     """Отправить сообщение конкретным ботом.
 
     Без bot_id берём первого живого — так работают служебные уведомления,
@@ -76,14 +77,23 @@ async def send(chat_id: str, text: str, image_path: str | None = None,
     keyboard = markup or _markup(button)
     for _ in range(3):
         try:
-            if image_path:
-                path = Path(image_path)
-                if not path.is_absolute():
-                    path = config.MEDIA_DIR / path.name
+            if media_path:
+                from .base import media_file, media_kind
+                path = media_file(media_path)
                 if path.exists():
-                    await bot.send_photo(
-                        chat_id, FSInputFile(str(path)),
-                        caption=text[:1024] or None, reply_markup=keyboard,
+                    kind = kind or media_kind(media_path)
+                    file = FSInputFile(str(path))
+                    caption = text[:1024] or None
+                    # у каждого типа свой метод: иначе голосовое приедет файлом
+                    senders = {
+                        "photo": bot.send_photo,
+                        "voice": bot.send_voice,
+                        "audio": bot.send_audio,
+                        "video": bot.send_video,
+                        "document": bot.send_document,
+                    }
+                    await senders.get(kind, bot.send_document)(
+                        chat_id, file, caption=caption, reply_markup=keyboard
                     )
                     if len(text) > 1024:
                         await bot.send_message(chat_id, text[1024:])

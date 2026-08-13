@@ -28,8 +28,9 @@ def _headers() -> dict:
     }
 
 
-async def send(phone: str, text: str, image_path: str | None = None,
-               button: tuple[str, str] | None = None) -> tuple[bool, str]:
+async def send(phone: str, text: str, media_path: str | None = None,
+               button: tuple[str, str] | None = None,
+               kind: str | None = None) -> tuple[bool, str]:
     """Отправить сообщение в WhatsApp.
 
     Кнопку-ссылку Cloud API в обычном сообщении не поддерживает (только в
@@ -44,14 +45,20 @@ async def send(phone: str, text: str, image_path: str | None = None,
     url = f"{API}/{config.WA_PHONE_ID}/messages"
     payload: dict = {"messaging_product": "whatsapp", "to": phone}
 
-    if image_path:
-        path = Path(image_path)
-        if not path.is_absolute():
-            path = config.MEDIA_DIR / path.name
+    if media_path:
+        from .base import media_file, media_kind
+        path = media_file(media_path)
+        kind = kind or media_kind(media_path)
         media_id = await _upload(path) if path.exists() else None
         if media_id:
-            payload["type"] = "image"
-            payload["image"] = {"id": media_id, "caption": text[:1024]}
+            # у Cloud API голосовое и музыка — один тип audio
+            wa_type = {"photo": "image", "voice": "audio", "audio": "audio",
+                       "video": "video"}.get(kind, "document")
+            payload["type"] = wa_type
+            payload[wa_type] = {"id": media_id}
+            # подпись поддерживают только картинка, видео и документ
+            if text and wa_type in ("image", "video", "document"):
+                payload[wa_type]["caption"] = text[:1024]
         else:
             payload["type"] = "text"
             payload["text"] = {"body": text}
@@ -76,7 +83,9 @@ async def send(phone: str, text: str, image_path: str | None = None,
 
 
 async def _upload(path: Path) -> str | None:
-    """Загрузить картинку и получить media_id."""
+    """Загрузить файл и получить media_id."""
+    import mimetypes
+    mime = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
     try:
         async with httpx.AsyncClient(timeout=60) as client:
             with path.open("rb") as fh:
@@ -84,7 +93,7 @@ async def _upload(path: Path) -> str | None:
                     f"{API}/{config.WA_PHONE_ID}/media",
                     headers={"Authorization": f"Bearer {config.WA_TOKEN}"},
                     data={"messaging_product": "whatsapp"},
-                    files={"file": (path.name, fh, "image/jpeg")},
+                    files={"file": (path.name, fh, mime)},
                 )
             resp.raise_for_status()
             return resp.json().get("id")

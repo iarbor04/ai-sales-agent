@@ -44,6 +44,38 @@ templates.env.filters["dt"] = lambda ts: (
 templates.env.filters["short"] = lambda text, n=60: (
     (text or "")[:n] + ("…" if text and len(text) > n else "")
 )
+templates.env.filters["time"] = lambda ts: (
+    datetime.fromtimestamp(ts).strftime("%H:%M") if ts else ""
+)
+
+
+def _day(ts: int) -> str:
+    """Подпись-разделитель между днями переписки."""
+    if not ts:
+        return ""
+    when = datetime.fromtimestamp(ts).date()
+    today = datetime.now().date()
+    delta = (today - when).days
+    if delta == 0:
+        return "Сегодня"
+    if delta == 1:
+        return "Вчера"
+    return when.strftime("%d.%m.%Y")
+
+
+def _initials(name: str) -> str:
+    parts = [p for p in (name or "").replace("@", " ").split() if p]
+    if not parts:
+        return "?"
+    if len(parts) == 1:
+        return parts[0][:2].upper()
+    return (parts[0][0] + parts[1][0]).upper()
+
+
+templates.env.filters["day"] = _day
+templates.env.filters["initials"] = _initials
+# цвет аватарки — от идентификатора, чтобы у человека он не менялся
+templates.env.filters["hue"] = lambda value: (int(value) * 47) % 360
 
 
 @contextlib.asynccontextmanager
@@ -182,6 +214,16 @@ async def dashboard(request: Request):
                 recent=recent, kb=knowledge.stats())
 
 
+async def _save_upload(upload) -> str | None:
+    """Сохранить присланный файл в хранилище. Возвращает имя файла."""
+    if not upload or not getattr(upload, "filename", ""):
+        return None
+    suffix = Path(upload.filename).suffix or ".bin"
+    name = f"{uuid.uuid4().hex}{suffix}"
+    (config.MEDIA_DIR / name).write_bytes(await upload.read())
+    return name
+
+
 # ── диалоги ────────────────────────────────────────────────────────────
 
 @app.get("/dialogs", response_class=HTMLResponse)
@@ -218,11 +260,18 @@ async def dialog_messages(contact_id: int, after: int = 0):
 
 
 @app.post("/dialogs/{contact_id}/reply")
-async def reply(contact_id: int, text: str = Form("")):
-    """Ответ менеджера уходит клиенту в его исходный мессенджер."""
-    text = text.strip()
-    if text:
-        await base.send(contact_id, text, author="manager")
+async def reply(request: Request, contact_id: int):
+    """Ответ менеджера уходит клиенту в его исходный мессенджер.
+
+    Можно отправить текст, файл или то и другое сразу: фото, голосовое,
+    видео и документы уходят нужным типом, а не одинаковым вложением.
+    """
+    form = await request.form()
+    text = str(form.get("text") or "").strip()
+    media = await _save_upload(form.get("file"))  # type: ignore[arg-type]
+
+    if text or media:
+        await base.send(contact_id, text, media, author="manager")
         # менеджер вступил в разговор — ИИ замолкает
         db.set_ai(contact_id, False)
     return RedirectResponse(f"/dialogs?c={contact_id}", status_code=303)
@@ -399,15 +448,6 @@ async def broadcast_retry(broadcast_id: int):
     db.run("UPDATE broadcasts SET status = 'confirmed' WHERE id = ?", (broadcast_id,))
     asyncio.create_task(broadcast.send_broadcast(broadcast_id))
     return RedirectResponse("/broadcast", status_code=303)
-
-
-async def _save_upload(upload) -> str | None:
-    if not upload or not getattr(upload, "filename", ""):
-        return None
-    suffix = Path(upload.filename).suffix or ".jpg"
-    name = f"{uuid.uuid4().hex}{suffix}"
-    (config.MEDIA_DIR / name).write_bytes(await upload.read())
-    return name
 
 
 # ── настройки ──────────────────────────────────────────────────────────
