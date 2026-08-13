@@ -65,6 +65,13 @@ async def send(contact_id: int, text: str, media_path: str | None = None,
             contact["external_id"], text, media_path, button,
             bot_id=contact["bot_id"], kind=kind,
         )
+    elif channel == "max":
+        from . import maxru
+        row = db.bot(contact["bot_id"]) if contact["bot_id"] else None
+        ok, status = await maxru.send(
+            contact["external_id"], text, media_path, button,
+            token=row["token"] if row else None, kind=kind,
+        )
     elif channel == "wa":
         from . import whatsapp
         ok, status = await whatsapp.send(

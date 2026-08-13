@@ -8,7 +8,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from . import broadcast, config, db, rivals, sheets
+from . import booking, broadcast, config, db, rivals, sheets
 
 log = logging.getLogger("scheduler")
 
@@ -20,7 +20,43 @@ async def _tick() -> None:
     await broadcast.due()
     await _sync_sheets()
     await _watch_rivals()
+    await _remind_bookings()
     await _retry_pending()
+
+
+async def _remind_bookings() -> None:
+    """Напомнить клиенту о записи — это заметно снижает неявки."""
+    try:
+        hours = int(db.setting("booking_remind_hours", "3") or 3)
+    except ValueError:
+        hours = 3
+    if hours <= 0:
+        return
+
+    horizon = db.now() + hours * 3600
+    rows = db.q(
+        "SELECT b.*, s.title AS service FROM bookings b"
+        " LEFT JOIN services s ON s.id = b.service_id"
+        " WHERE b.reminded = 0 AND b.status != 'cancelled'"
+        "   AND b.starts_at BETWEEN ? AND ?",
+        (db.now(), horizon),
+    )
+    if not rows:
+        return
+
+    from .channels import base
+    from datetime import datetime
+    for row in rows:
+        when = datetime.fromtimestamp(row["starts_at"]).strftime("%d.%m в %H:%M")
+        ok, _ = await base.send(
+            row["contact_id"],
+            f"Напоминаем о записи: {row['service'] or 'визит'} — {when}. Ждём вас!",
+            author="ai",
+        )
+        # помечаем в любом случае, иначе будем долбить клиента каждые 30 секунд
+        db.run("UPDATE bookings SET reminded = 1 WHERE id = ?", (row["id"],))
+        if not ok:
+            log.info("напоминание о записи %s не доставлено", row["id"])
 
 
 async def _watch_rivals() -> None:

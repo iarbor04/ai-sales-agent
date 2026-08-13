@@ -51,7 +51,7 @@ WA_TOKEN = _env("WHATSAPP_TOKEN")
 WA_PHONE_ID = _env("WHATSAPP_PHONE_ID")
 WA_VERIFY_TOKEN = _env("WHATSAPP_VERIFY_TOKEN", "verify-me")
 
-CHANNEL_TITLES = {"tg": "Telegram", "wa": "WhatsApp"}
+CHANNEL_TITLES = {"tg": "Telegram", "wa": "WhatsApp", "max": "MAX"}
 
 
 def telegram_enabled() -> bool:

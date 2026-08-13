@@ -1,0 +1,163 @@
+{% extends "base.html" %}
+{% block title %}Запись · ИИ-продажник{% endblock %}
+{% block body %}
+<div class="topbar">
+  <div style="flex:1">
+    <h1>Онлайн-запись</h1>
+    <p class="sub">Агент сам предлагает свободное время и записывает клиента
+      прямо в переписке.</p>
+  </div>
+  {% if on %}<span class="pill ok">включена</span>
+  {% else %}<span class="pill off">выключена</span>{% endif %}
+</div>
+
+{% if on and not services %}
+<div class="card warn">
+  <b>Запись включена, но услуг нет.</b> Пока не добавите хотя бы одну услугу,
+  агент записывать не сможет.
+</div>
+{% endif %}
+
+<div class="grid c2">
+  <div class="card">
+    <h2>Услуги</h2>
+    {% if services %}
+    <table>
+      <tr><th>Услуга</th><th style="width:90px">Длит.</th>
+          <th style="width:110px">Цена</th><th style="width:80px"></th></tr>
+      {% for s in services %}
+      <tr>
+        <td>{{ s.title }}</td>
+        <td class="small">{{ s.duration_min }} мин</td>
+        <td class="small">{{ s.price or '—' }}</td>
+        <td>
+          <form method="post" action="/booking/service/{{ s.id }}/delete">
+            <button class="btn ghost small">убрать</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}
+    <p class="muted small">Услуг пока нет.</p>
+    {% endif %}
+
+    <form method="post" action="/booking/service" style="margin-top:14px">
+      <div class="row">
+        <div class="field" style="flex:2"><label>Название</label>
+          <input type="text" name="title" placeholder="Стрижка" required></div>
+        <div class="field"><label>Минут</label>
+          <input type="number" name="duration" value="60" min="5" step="5"></div>
+        <div class="field"><label>Цена</label>
+          <input type="text" name="price" placeholder="1500 ₽"></div>
+      </div>
+      <button class="btn ghost small" type="submit">Добавить услугу</button>
+    </form>
+    <div class="callout">
+      Длительность задаёт сетку времени: услуга на 40 минут — окна через
+      40 минут, а не через час.
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Сотрудники</h2>
+    {% if staff %}
+    <table>
+      {% for s in staff %}
+      <tr>
+        <td>{{ s.name }}</td>
+        <td class="right">
+          <form method="post" action="/booking/staff/{{ s.id }}/delete">
+            <button class="btn ghost small">убрать</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}
+    <p class="muted small">Сотрудников нет — записи будут без привязки к мастеру.</p>
+    {% endif %}
+
+    <form method="post" action="/booking/staff" style="margin-top:14px">
+      <div class="row">
+        <div class="field"><label>Имя</label>
+          <input type="text" name="name" placeholder="Ольга" required></div>
+        <button class="btn ghost small" type="submit">Добавить</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<form method="post" action="/booking/settings">
+  <div class="card">
+    <h2>Часы работы и напоминания</h2>
+    <label class="check">
+      <input type="checkbox" name="on" {{ 'checked' if on }}>
+      <span>агент предлагает запись и фиксирует время</span>
+    </label>
+
+    <table style="margin-top:10px">
+      <tr><th>День</th><th style="width:130px">С</th><th style="width:130px">До</th></tr>
+      {% for i in range(7) %}
+      <tr>
+        <td>{{ weekdays[i] }}</td>
+        <td><input type="text" name="open_{{ i }}"
+                   value="{{ hours.get(i, ('',''))[0] }}" placeholder="10:00"></td>
+        <td><input type="text" name="close_{{ i }}"
+                   value="{{ hours.get(i, ('',''))[1] }}" placeholder="19:00"></td>
+      </tr>
+      {% endfor %}
+    </table>
+    <p class="dim small">Пустые поля — выходной.</p>
+
+    <div class="row">
+      <div class="field" style="max-width:260px">
+        <label>Напомнить клиенту за сколько часов</label>
+        <input type="number" name="remind" value="{{ remind }}" min="0" max="72">
+        <span class="note">Ноль — не напоминать. Напоминание заметно снижает неявки.</span>
+      </div>
+    </div>
+    <button class="btn" type="submit">Сохранить</button>
+  </div>
+</form>
+
+<div class="card">
+  <h2>Журнал записей</h2>
+  {% if rows %}
+  <table>
+    <tr><th>Когда</th><th>Клиент</th><th>Услуга</th><th>Мастер</th>
+        <th>Канал</th><th style="width:90px"></th></tr>
+    {% for b in rows %}
+    <tr>
+      <td><b>{{ b.starts_at | dt }}</b></td>
+      <td><a href="/dialogs?c={{ b.cid }}">{{ b.name or b.username or b.phone or 'id' ~ b.cid }}</a></td>
+      <td>{{ b.service or '—' }}</td>
+      <td class="small">{{ b.staff_name or '—' }}</td>
+      <td class="small muted">{{ channels.get(b.channel, b.channel) }}</td>
+      <td>
+        <form method="post" action="/booking/{{ b.id }}/cancel">
+          <button class="btn ghost small">отменить</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <div class="empty">
+    <div class="big">Записей нет</div>
+    <p class="muted">Появятся здесь, как только клиент выберет время в переписке.</p>
+  </div>
+  {% endif %}
+</div>
+
+{% if slots %}
+<div class="card">
+  <h2>Ближайшие свободные окна <span class="hint">их и предлагает агент</span></h2>
+  <div class="row">
+    {% for s in slots %}
+    <span class="pill">{{ s.weekday }} {{ s.label }}{% if s.staff %} · {{ s.staff }}{% endif %}</span>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+{% endblock %}

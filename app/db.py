@@ -72,6 +72,7 @@ SCHEMA = [
         title TEXT NOT NULL,
         token TEXT NOT NULL UNIQUE,
         role TEXT NOT NULL DEFAULT 'sales',
+        platform TEXT NOT NULL DEFAULT 'tg',
         username TEXT,
         enabled INTEGER NOT NULL DEFAULT 1,
         greeting TEXT,
@@ -193,6 +194,35 @@ SCHEMA = [
         last_error TEXT,
         created_at INTEGER NOT NULL
     )""",
+    # Онлайн-запись: услуги, сотрудники, часы работы и журнал записей.
+    """CREATE TABLE IF NOT EXISTS services (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT NOT NULL,
+        duration_min INTEGER NOT NULL DEFAULT 60,
+        price TEXT,
+        enabled INTEGER NOT NULL DEFAULT 1
+    )""",
+    """CREATE TABLE IF NOT EXISTS staff (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        enabled INTEGER NOT NULL DEFAULT 1
+    )""",
+    """CREATE TABLE IF NOT EXISTS work_hours (
+        weekday INTEGER PRIMARY KEY,
+        open_at TEXT,
+        close_at TEXT
+    )""",
+    """CREATE TABLE IF NOT EXISTS bookings (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        contact_id INTEGER NOT NULL,
+        service_id INTEGER,
+        staff_id INTEGER,
+        starts_at INTEGER NOT NULL,
+        status TEXT NOT NULL DEFAULT 'new',
+        reminded INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_booking_time ON bookings(starts_at)",
     # Конкуренты: следим за их публичными страницами и замечаем изменения.
     """CREATE TABLE IF NOT EXISTS rivals (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -229,6 +259,7 @@ LATE_COLUMNS = [
     ("contacts", "opted_in", "INTEGER NOT NULL DEFAULT 1"),
     ("contacts", "bot_id", "INTEGER"),
     ("contacts", "step", "INTEGER NOT NULL DEFAULT 0"),
+    ("bots", "platform", "TEXT NOT NULL DEFAULT 'tg'"),
     ("bots", "script_enabled", "INTEGER NOT NULL DEFAULT 0"),
     ("bots", "greeting", "TEXT"),
     ("bots", "last_error", "TEXT"),
@@ -328,6 +359,9 @@ DEFAULT_SETTINGS = {
     # как часто обходить сайты конкурентов, в часах
     "rivals_every_hours": "12",
     "rivals_notify": "1",
+    # онлайн-запись
+    "booking_enabled": "0",
+    "booking_remind_hours": "3",
 }
 
 
@@ -358,6 +392,14 @@ def init() -> None:
 
     for key, value in DEFAULT_SETTINGS.items():
         run("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (key, value))
+
+    if not q("SELECT 1 FROM work_hours LIMIT 1"):
+        # будни с 10 до 19, выходные закрыты — правится в панели
+        for weekday in range(7):
+            run("INSERT OR IGNORE INTO work_hours (weekday, open_at, close_at)"
+                " VALUES (?, ?, ?)",
+                (weekday, "10:00" if weekday < 5 else None,
+                 "19:00" if weekday < 5 else None))
 
     if not q("SELECT 1 FROM script_steps LIMIT 1"):
         for position, (title, goal, field) in enumerate(DEFAULT_SCRIPT):
@@ -574,10 +616,12 @@ def bot(bot_id: int) -> sqlite3.Row | None:
     return q1("SELECT * FROM bots WHERE id = ?", (bot_id,))
 
 
-def add_bot(title: str, token: str, role: str = "sales") -> int:
+def add_bot(title: str, token: str, role: str = "sales",
+            platform: str = "tg") -> int:
     return run(
-        "INSERT INTO bots (title, token, role, created_at) VALUES (?, ?, ?, ?)",
-        (title, token.strip(), role, now()),
+        "INSERT INTO bots (title, token, role, platform, created_at)"
+        " VALUES (?, ?, ?, ?, ?)",
+        (title, token.strip(), role, platform, now()),
     )
 
 

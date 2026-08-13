@@ -26,8 +26,8 @@ from fastapi.templating import Jinja2Templates
 from itsdangerous import BadSignature, URLSafeSerializer
 
 from .. import (
-    broadcast, config, db, knowledge, llm, onboarding, retrieval, rivals,
-    sales, scheduler, sheets,
+    booking, broadcast, config, db, knowledge, llm, onboarding, retrieval,
+    rivals, sales, scheduler, sheets,
 )
 from .. import channels
 from ..channels import base, telegram, whatsapp
@@ -83,12 +83,12 @@ async def lifespan(app: FastAPI):
     db.init()
     channels.adopt_env_token()
     knowledge.reindex_extra()
-    await telegram.start()
+    await channels.start_all()
     await scheduler.start()
     log.info("панель на %s", config.PUBLIC_URL)
     yield
     await scheduler.stop()
-    await telegram.stop()
+    await channels.stop_all()
 
 
 app = FastAPI(title="ИИ-продажник", lifespan=lifespan)
@@ -523,6 +523,18 @@ async def hook_telegram(bot_id: int, request: Request):
     return JSONResponse({"ok": True})
 
 
+@app.post("/hook/max/{bot_id}")
+async def hook_max(bot_id: int, request: Request):
+    """Апдейты MAX. У каждого бота свой адрес."""
+    row = db.bot(bot_id)
+    if row is None or row["platform"] != "max":
+        return JSONResponse({"ok": False}, status_code=404)
+    payload = await request.json()
+    from ..channels import maxru
+    asyncio.create_task(maxru.feed(row, payload))
+    return JSONResponse({"ok": True})
+
+
 @app.get("/hook/whatsapp")
 async def hook_whatsapp_verify(request: Request):
     """Meta проверяет адрес GET-запросом и ждёт обратно hub.challenge."""
@@ -544,16 +556,17 @@ async def hook_whatsapp(request: Request):
 @app.get("/bots", response_class=HTMLResponse)
 async def bots_page(request: Request):
     rows = db.bots(only_enabled=False)
-    live = set(telegram.BOTS)
-    return page(request, "bots.html", rows=rows, live=live, mode=config.MODE,
+    return page(request, "bots.html", rows=rows, live=channels.live_ids(), mode=config.MODE,
                 public_url=config.PUBLIC_URL)
 
 
 @app.post("/bots/add")
-async def bots_add(title: str = Form(""), token: str = Form(...), role: str = Form("sales")):
-    """Добавить бота по токену от BotFather. Токен проверяем до сохранения."""
+async def bots_add(title: str = Form(""), token: str = Form(...),
+                   role: str = Form("sales"), platform: str = Form("tg")):
+    """Добавить бота по токену. Токен проверяем до сохранения."""
     token = token.strip()
-    probe = await telegram.check_token(token)
+    platform = platform if platform in ("tg", "max") else "tg"
+    probe = await channels.check_token(platform, token)
     if not probe["ok"]:
         return RedirectResponse(f"/bots?error={probe['error'][:120]}", status_code=303)
 
@@ -561,8 +574,8 @@ async def bots_add(title: str = Form(""), token: str = Form(...), role: str = Fo
         return RedirectResponse("/bots?error=такой+бот+уже+добавлен", status_code=303)
 
     db.add_bot(title.strip() or f"@{probe['username']}", token,
-               role if role in ("sales", "manager") else "sales")
-    await telegram.reload()
+               role if role in ("sales", "manager") else "sales", platform)
+    await channels.reload_all()
     return RedirectResponse("/bots", status_code=303)
 
 
@@ -576,21 +589,21 @@ async def bots_save(bot_id: int, title: str = Form(""), role: str = Form("sales"
         (title.strip(), role, greeting.strip() or None,
          1 if enabled else 0, 1 if script_enabled else 0, bot_id),
     )
-    await telegram.reload()
+    await channels.reload_all()
     return RedirectResponse("/bots", status_code=303)
 
 
 @app.post("/bots/{bot_id}/delete")
 async def bots_delete(bot_id: int):
     db.run("DELETE FROM bots WHERE id = ?", (bot_id,))
-    await telegram.reload()
+    await channels.reload_all()
     return RedirectResponse("/bots", status_code=303)
 
 
 @app.post("/bots/reload")
 async def bots_reload():
     """Перечитать реестр и переставить вебхуки — без перезапуска службы."""
-    await telegram.reload()
+    await channels.reload_all()
     return RedirectResponse("/bots", status_code=303)
 
 
@@ -779,14 +792,16 @@ async def setup_page(request: Request, step: str = "bot"):
 
 
 @app.post("/setup/bot")
-async def setup_bot(title: str = Form(""), token: str = Form(...), role: str = Form("sales")):
-    probe = await telegram.check_token(token.strip())
+async def setup_bot(title: str = Form(""), token: str = Form(...),
+                    role: str = Form("sales"), platform: str = Form("tg")):
+    platform = platform if platform in ("tg", "max") else "tg"
+    probe = await channels.check_token(platform, token.strip())
     if not probe["ok"]:
         return RedirectResponse(f"/setup?step=bot&error={probe['error'][:100]}", status_code=303)
     if not db.q1("SELECT 1 FROM bots WHERE token = ?", (token.strip(),)):
         db.add_bot(title.strip() or f"@{probe['username']}", token.strip(),
-                   role if role in ("sales", "manager") else "sales")
-        await telegram.reload()
+                   role if role in ("sales", "manager") else "sales", platform)
+        await channels.reload_all()
     nxt = "business" if role == "sales" else "bot"
     return RedirectResponse(f"/setup?step={nxt}", status_code=303)
 
@@ -926,3 +941,67 @@ async def rivals_settings(every: str = Form("12"), notify_on: str = Form("")):
     db.set_setting("rivals_every_hours", every.strip() or "12")
     db.set_setting("rivals_notify", "1" if notify_on else "0")
     return RedirectResponse("/rivals", status_code=303)
+
+
+# ── онлайн-запись ──────────────────────────────────────────────────────
+
+@app.get("/booking", response_class=HTMLResponse)
+async def booking_page(request: Request):
+    return page(request, "booking.html",
+                services=booking.services(only_enabled=False),
+                staff=booking.staff(only_enabled=False),
+                hours=booking.hours(),
+                weekdays=booking.WEEKDAYS,
+                rows=booking.upcoming(),
+                slots=booking.free_slots(limit=8) if booking.enabled() else [],
+                on=db.setting("booking_enabled", "0") == "1",
+                remind=db.setting("booking_remind_hours", "3"))
+
+
+@app.post("/booking/settings")
+async def booking_settings(request: Request):
+    form = await request.form()
+    db.set_setting("booking_enabled", "1" if form.get("on") else "0")
+    db.set_setting("booking_remind_hours", str(form.get("remind") or "3"))
+    for weekday in range(7):
+        open_at = str(form.get(f"open_{weekday}") or "").strip()
+        close_at = str(form.get(f"close_{weekday}") or "").strip()
+        db.run(
+            "INSERT INTO work_hours (weekday, open_at, close_at) VALUES (?, ?, ?)"
+            " ON CONFLICT(weekday) DO UPDATE SET open_at = excluded.open_at,"
+            " close_at = excluded.close_at",
+            (weekday, open_at or None, close_at or None),
+        )
+    return RedirectResponse("/booking", status_code=303)
+
+
+@app.post("/booking/service")
+async def booking_service(title: str = Form(...), duration: int = Form(60),
+                          price: str = Form("")):
+    db.run("INSERT INTO services (title, duration_min, price) VALUES (?, ?, ?)",
+           (title.strip(), max(duration, 5), price.strip() or None))
+    return RedirectResponse("/booking", status_code=303)
+
+
+@app.post("/booking/service/{service_id}/delete")
+async def booking_service_delete(service_id: int):
+    db.run("DELETE FROM services WHERE id = ?", (service_id,))
+    return RedirectResponse("/booking", status_code=303)
+
+
+@app.post("/booking/staff")
+async def booking_staff(name: str = Form(...)):
+    db.run("INSERT INTO staff (name) VALUES (?)", (name.strip(),))
+    return RedirectResponse("/booking", status_code=303)
+
+
+@app.post("/booking/staff/{staff_id}/delete")
+async def booking_staff_delete(staff_id: int):
+    db.run("DELETE FROM staff WHERE id = ?", (staff_id,))
+    return RedirectResponse("/booking", status_code=303)
+
+
+@app.post("/booking/{booking_id}/cancel")
+async def booking_cancel(booking_id: int):
+    db.run("UPDATE bookings SET status = 'cancelled' WHERE id = ?", (booking_id,))
+    return RedirectResponse("/booking", status_code=303)

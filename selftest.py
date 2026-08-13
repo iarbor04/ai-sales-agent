@@ -191,6 +191,26 @@ def main() -> int:
     db.reorder_script(list(reversed(ids)))
     check("порядок шагов меняется", [s["id"] for s in db.script()] == list(reversed(ids)))
 
+    section("Онлайн-запись")
+    from app import booking as bk
+    db.run("INSERT INTO services (title, duration_min, price) VALUES ('Стрижка', 40, '1500')")
+    db.run("INSERT INTO staff (name) VALUES ('Ольга')")
+    db.set_setting("booking_enabled", "1")
+    check("часы работы засеяны", len(bk.hours()) >= 5, f"дней: {len(bk.hours())}")
+    slots = bk.free_slots(limit=6)
+    check("свободные окна считаются", len(slots) > 0, f"окон: {len(slots)}")
+    if slots:
+        step = (slots[1]["at"] - slots[0]["at"]) // 60 if len(slots) > 1 else 40
+        check("шаг сетки равен длительности услуги", step == 40, f"шаг {step} мин")
+        contact = db.upsert_contact("tg", "950", "bk", "Клиент", bot_id=bot_id)
+        first = bk.book(contact["id"], slots[0]["label"])
+        check("запись создаётся", first["ok"], str(first))
+        again = bk.book(contact["id"], slots[0]["label"])
+        check("занятое время повторно не бронируется", not again["ok"],
+              "слот отдали дважды")
+        check("запись видна в журнале", len(bk.upcoming()) == 1)
+    check("блок для модели содержит услуги", "Стрижка" in bk.slots_for_prompt())
+
     section("Конкуренты")
     from app import rivals
     rid = db.add_rival("Тестовый конкурент", "https://example.com/price")

@@ -29,6 +29,7 @@ ANSWER_SCHEMA = """{
   "handoff": true или false,
   "handoff_reason": "почему нужен человек, пусто если не нужен",
   "step_done": true или false,
+  "booking": null или {"at": "ДД.ММ ЧЧ:ММ", "service": "название услуги"},
   "fields": {
     "name": "", "contact": "", "product": "", "need": "", "deadline": "", "comment": ""
   },
@@ -222,6 +223,7 @@ async def answer(contact_id: int, question: str) -> dict:
         "handoff": True,
         "handoff_reason": "модель недоступна",
         "step_done": False,
+        "booking": None,
         "fields": {},
         "summary": "",
     }
@@ -250,7 +252,9 @@ async def answer(contact_id: int, question: str) -> dict:
         + f"\n\nПоследнее сообщение клиента: {question}\n\nОтветь JSON-объектом."
     )
 
-    data = _parse(await _call(_system_prompt() + _script_block(contact_id), user))
+    from . import booking as booking_mod
+    system = _system_prompt() + _script_block(contact_id) + booking_mod.slots_for_prompt()
+    data = _parse(await _call(system, user))
     if not data:
         return fallback
 
@@ -265,6 +269,7 @@ async def answer(contact_id: int, question: str) -> dict:
         "handoff": bool(data.get("handoff")),
         "handoff_reason": str(data.get("handoff_reason") or "").strip(),
         "step_done": bool(data.get("step_done")),
+        "booking": data.get("booking") if isinstance(data.get("booking"), dict) else None,
         "fields": fields if isinstance(fields, dict) else {},
         "summary": str(data.get("summary") or "").strip(),
     }

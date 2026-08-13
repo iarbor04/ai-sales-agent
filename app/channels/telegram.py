@@ -345,18 +345,23 @@ async def _spin_down(bot_id: int) -> None:
             pass
 
 
+def _mine() -> list:
+    """Только Telegram-боты: MAX поднимает свой модуль."""
+    return [r for r in db.bots(only_enabled=True) if r["platform"] == "tg"]
+
+
 async def start() -> None:
-    """Поднять всех включённых ботов из базы."""
-    rows = db.bots(only_enabled=True)
+    """Поднять всех включённых Telegram-ботов из базы."""
+    rows = _mine()
     if not rows:
-        log.info("ботов не заведено — добавьте их в панели, раздел «Боты»")
+        log.info("Telegram-ботов нет — добавьте их в панели, раздел «Боты»")
     for row in rows:
         await _spin_up(row)
 
 
 async def reload() -> None:
     """Привести живых ботов в соответствие с базой. Зовётся из панели."""
-    wanted = {row["id"]: row for row in db.bots(only_enabled=True)}
+    wanted = {row["id"]: row for row in _mine()}
 
     for bot_id in list(BOTS):
         if bot_id not in wanted:

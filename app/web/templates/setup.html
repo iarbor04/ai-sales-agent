@@ -28,7 +28,12 @@
       <div class="row">
         <div class="field"><label>Название (для вас)</label>
           <input type="text" name="title" placeholder="Продажник"></div>
-        <div class="field"><label>Токен от @BotFather</label>
+        <div class="field"><label>Мессенджер</label>
+          <select name="platform">
+            <option value="tg">Telegram — токен у @BotFather</option>
+            <option value="max">MAX — токен у @MasterBot</option>
+          </select></div>
+        <div class="field"><label>Токен бота</label>
           <input type="text" name="token" placeholder="123456:AAH..." required autofocus></div>
       </div>
       <div class="field">

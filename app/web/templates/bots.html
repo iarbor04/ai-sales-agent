@@ -14,7 +14,12 @@
     <div class="row">
       <div class="field"><label>Название</label>
         <input type="text" name="title" placeholder="Продажник"></div>
-      <div class="field"><label>Токен от @BotFather</label>
+      <div class="field"><label>Мессенджер</label>
+        <select name="platform">
+          <option value="tg">Telegram — токен у @BotFather</option>
+          <option value="max">MAX — токен у @MasterBot</option>
+        </select></div>
+      <div class="field"><label>Токен бота</label>
         <input type="text" name="token" placeholder="123456:AA..." required></div>
       <div class="field"><label>Роль</label>
         <select name="role">
@@ -35,6 +40,7 @@
     <div class="row between">
       <h2 style="margin:0">
         {{ b.title }}
+        <span class="pill">{{ 'MAX' if b.platform == 'max' else 'Telegram' }}</span>
         {% if b.username %}<span class="muted small">@{{ b.username }}</span>{% endif %}
       </h2>
       <div>
@@ -83,7 +89,7 @@
     </label>
 
     {% if mode == 'webhook' %}
-    <p class="muted small">Вебхук: <code>{{ public_url }}/hook/telegram/{{ b.id }}</code></p>
+    <p class="muted small">Вебхук: <code>{{ public_url }}/hook/{{ 'max' if b.platform == 'max' else 'telegram' }}/{{ b.id }}</code></p>
     {% endif %}
 
     <div class="row between" style="margin-top:10px">

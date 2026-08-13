@@ -87,3 +87,17 @@ async def rival_changed(title: str, url: str, summary: str) -> None:
         f'<a href="{url}">Открыть страницу</a> · '
         f'<a href="{config.PUBLIC_URL}/rivals">Все изменения</a>'
     )
+
+
+async def booked(contact_id: int, slot: dict) -> None:
+    """Клиент записался — сообщаем менеджеру."""
+    contact = db.contact_by_id(contact_id)
+    if contact is None:
+        return
+    who = f"\nМастер: {slot['staff']}" if slot.get("staff") else ""
+    await _push(
+        f"📅 <b>Новая запись</b>\n"
+        f"Клиент: {_who(contact)}\n"
+        f"Услуга: {slot['service']}\n"
+        f"Когда: {slot['weekday']} {slot['label']}{who}"
+    )

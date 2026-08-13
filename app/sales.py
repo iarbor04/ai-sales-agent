@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from . import config, db, llm, notify
+from . import booking, config, db, llm, notify
 from .channels import base
 
 log = logging.getLogger("sales")
@@ -84,6 +84,10 @@ async def handle_incoming(contact_id: int, text: str, media_type: str | None = N
         await hand_off(contact_id, f"сообщение не доставлено ({status})", silent=True)
         return
 
+    # клиент выбрал время — фиксируем запись
+    if result.get("booking"):
+        await _make_booking(contact_id, result["booking"])
+
     # шаг сценария закрыт — следующее сообщение пойдёт по следующему шагу
     if result.get("step_done"):
         db.advance_step(contact_id)
@@ -111,6 +115,33 @@ def _save_fields(contact_id: int, fields: dict, summary: str = "") -> None:
     contact = db.contact_by_id(contact_id)
     if payload.get("name") and contact and not contact["name"]:
         db.run("UPDATE contacts SET name = ? WHERE id = ?", (payload["name"], contact_id))
+
+
+async def _make_booking(contact_id: int, choice: dict) -> None:
+    """Записать клиента на выбранное время.
+
+    Слот перепроверяем: пока шёл разговор, его мог занять другой человек.
+    """
+    at = str(choice.get("at") or "").strip()
+    if not at:
+        return
+
+    result = booking.book(contact_id, at, str(choice.get("service") or ""))
+    if not result["ok"]:
+        await base.send(
+            contact_id,
+            "Это время только что заняли. Давайте подберём другое —"
+            " подскажите, когда вам удобно?",
+            author="ai",
+        )
+        return
+
+    slot = result["slot"]
+    who = f", мастер {slot['staff']}" if slot["staff"] else ""
+    db.add_message(contact_id, "out", "system",
+                   f"Запись создана: {slot['service']} — {slot['label']}{who}",
+                   is_read=True)
+    asyncio.create_task(notify.booked(contact_id, slot))
 
 
 def _bump_status(contact_id: int) -> None:
