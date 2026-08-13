@@ -1,17 +1,23 @@
 """MAX (мессенджер VK) — Bot API.
 
 Устроен похоже на Telegram, но отличия есть, и они важны:
-  • токен идёт в заголовке Authorization, а не в пути и не в query
+  • токен идёт query-параметром access_token
   • апдейты забираются GET /updates с маркером (long polling)
     либо приходят на вебхук, подписка через POST /subscriptions
   • получателя указываем chat_id или user_id параметром запроса
 
 Токен берётся у @MasterBot внутри MAX.
 
-Осторожно: модуль написан по документации, но на живом боте не проверялся —
-у нас нет тестового аккаунта MAX. Разбор апдейта сделан терпимым к форме:
-поля ищутся в нескольких местах, чтобы мелкое расхождение со схемой не
-роняло приём сообщений. Если что-то поедет — смотреть надо здесь, в _extract.
+Про адрес и авторизацию: страница документации утверждает, что база —
+platform-api2.max.ru, а токен надо слать заголовком Authorization. Это
+неверно: такой хост не резолвится вообще, а официальный SDK max-botapi-python
+ходит на botapi.max.ru и передаёт access_token параметром запроса. Проверено:
+botapi.max.ru отвечает 401 на неверный токен, то есть параметр он читает.
+Заголовок отправляем тоже — на случай, если его когда-нибудь введут.
+
+Структура апдейта сверена с моделями SDK: message.sender.user_id,
+message.recipient.chat_id, message.body.text. Разбор всё равно оставлен
+терпимым к форме — если MAX поменяет схему, чинить надо в _extract.
 """
 from __future__ import annotations
 
@@ -26,10 +32,16 @@ from .. import config, db
 
 log = logging.getLogger("max")
 
-API = "https://platform-api2.max.ru"
+# адрес из официального SDK; тот, что в документации, не существует
+API = "https://botapi.max.ru"
 
 _polling: dict[int, asyncio.Task] = {}
 _markers: dict[int, int] = {}
+
+
+def _auth(token: str) -> dict:
+    """Токен параметром запроса — так делает официальный SDK."""
+    return {"access_token": token}
 
 
 def _headers(token: str) -> dict:
@@ -68,7 +80,7 @@ async def send(chat_id: str, text: str, media_path: str | None = None,
             resp = await client.post(
                 f"{API}/messages",
                 headers=_headers(token),
-                params={"chat_id": chat_id},
+                params={**_auth(token), "chat_id": chat_id},
                 json=payload,
             )
             if resp.status_code >= 400:
@@ -99,7 +111,7 @@ async def _upload(token: str, media_path: str, kind: str | None) -> dict | None:
             prep = await client.post(
                 f"{API}/uploads",
                 headers={"Authorization": token},
-                params={"type": upload_type},
+                params={**_auth(token), "type": upload_type},
             )
             prep.raise_for_status()
             url = prep.json().get("url")
@@ -121,6 +133,7 @@ async def _upload(token: str, media_path: str, kind: str | None) -> dict | None:
 
 def _extract(update: dict) -> dict | None:
     """Достать из апдейта то, что нам нужно, не зная точной формы схемы."""
+    # типы апдейтов из SDK: message_created, bot_started и прочие
     if update.get("update_type") not in (None, "message_created", "bot_started"):
         return None
 
@@ -165,7 +178,7 @@ async def _poll(bot_row) -> None:
     while True:
         try:
             async with httpx.AsyncClient(timeout=60) as client:
-                params = {"timeout": 30}
+                params = {**_auth(token), "timeout": 30}
                 if _markers.get(bot_id):
                     params["marker"] = _markers[bot_id]
                 resp = await client.get(
@@ -189,7 +202,8 @@ async def check_token(token: str) -> dict:
     """Проверить токен до сохранения."""
     try:
         async with httpx.AsyncClient(timeout=20) as client:
-            resp = await client.get(f"{API}/me", headers={"Authorization": token.strip()})
+            resp = await client.get(f"{API}/me", headers={"Authorization": token.strip()},
+                                    params=_auth(token.strip()))
             if resp.status_code >= 400:
                 return {"ok": False, "error": f"MAX отклонил токен ({resp.status_code})"}
             info = resp.json()
@@ -210,6 +224,7 @@ async def start_bot(bot_row) -> None:
                 resp = await client.post(
                     f"{API}/subscriptions",
                     headers=_headers(token),
+                    params=_auth(token),
                     json={"url": url},
                 )
             if resp.status_code >= 400:

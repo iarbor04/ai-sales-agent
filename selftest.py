@@ -219,6 +219,20 @@ def main() -> int:
           parsed and parsed["chat_id"] == "c1" and parsed["text"] == "Ещё продаёте?")
     check("не-сообщения от Авито пропускаются",
           avito._extract({"payload": {"type": "read", "value": {}}}) is None)
+    bare = avito._extract({"chat_id": "c2", "author_id": 7, "type": "text",
+                           "content": {"text": "без конверта"}})
+    check("голая схема Авито тоже разбирается",
+          bare and bare["text"] == "без конверта")
+
+    from app.channels import maxru
+    check("MAX ходит на живой хост", "botapi.max.ru" in maxru.API, maxru.API)
+    check("MAX шлёт токен параметром", maxru._auth("t") == {"access_token": "t"})
+    got = maxru._extract({"update_type": "message_created", "message": {
+        "sender": {"user_id": 5, "first_name": "Пётр"},
+        "recipient": {"chat_id": 99}, "body": {"text": "привет"}}})
+    check("апдейт MAX разбирается по схеме SDK",
+          got and got["chat_id"] == "99" and got["text"] == "привет"
+          and got["name"] == "Пётр")
 
     from app import channels as ch
     check("каждая платформа знает свой модуль",

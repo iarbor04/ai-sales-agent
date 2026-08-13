@@ -11,14 +11,22 @@
   • входящие только вебхуком: у Авито нет long polling, поэтому канал
     требует MODE=webhook и публичного HTTPS.
 
-Осторожно: модуль написан по официальному каталогу эндпоинтов, но на живом
-кабинете не проверялся — у нас нет доступа продавца. Разбор вебхука сделан
-терпимым к форме; если поедет, смотреть надо в _extract.
+Сверено с официальным OpenAPI-спеком каталога developers.avito.ru:
+тело отправки — {"message": {"text": ...}, "type": "text"}, подписка на
+вебхук — {"url": ..., "secret": ...}, входящее событие описано схемой
+WebhookMessage с полями author_id, chat_id, content.text.
+
+Секрет из подписки используем по назначению: Авито возвращает его в заголовке,
+и чужой запрос на наш адрес мы отбрасываем. Адрес вебхука угадать несложно,
+поэтому без проверки любой мог бы слать нам поддельные сообщения.
+
+На живом кабинете продавца не гонялось — доступа нет.
 """
 from __future__ import annotations
 
 import json
 import logging
+import secrets
 import time
 
 import httpx
@@ -130,11 +138,18 @@ async def send(chat_id: str, text: str, media_path: str | None = None,
 
 
 def _extract(payload: dict) -> dict | None:
-    """Достать сообщение из вебхука, не привязываясь жёстко к схеме."""
+    """Достать сообщение из вебхука.
+
+    Событие приходит в конверте {"payload": {"type": "message", "value": {...}}},
+    но принимаем и голую схему WebhookMessage — на случай, если конверт
+    когда-нибудь уберут.
+    """
     body = payload.get("payload") or payload
     value = body.get("value") or body
 
-    if body.get("type") not in (None, "message"):
+    # у конверта type = message, у самого сообщения type = text/image/link
+    envelope_type = body.get("type")
+    if envelope_type and envelope_type not in ("message", "text", "image", "link"):
         return None
 
     chat_id = value.get("chat_id") or value.get("chatId")
@@ -145,6 +160,11 @@ def _extract(payload: dict) -> dict | None:
     content = value.get("content") or {}
     text = content.get("text") or value.get("text") or ""
     return {"chat_id": str(chat_id), "author": author, "text": text}
+
+
+def webhook_secret(bot_row) -> str:
+    """Секрет подписки — им проверяем, что событие действительно от Авито."""
+    return settings(bot_row).get("secret", "")
 
 
 async def feed(bot_row, payload: dict) -> None:
@@ -166,8 +186,6 @@ async def feed(bot_row, payload: dict) -> None:
 
 async def check_token(client_id: str, conf: dict) -> dict:
     """Проверить доступ до сохранения."""
-    fake = {"id": 0, "token": client_id.strip(),
-            "extra": json.dumps(conf, ensure_ascii=False)}
     try:
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.post(f"{API}/token", data={
@@ -201,6 +219,15 @@ async def start_bot(bot_row) -> None:
     if not token:
         return
 
+    # секрет генерируем один раз и храним рядом с доступами
+    conf = settings(bot_row)
+    secret = conf.get("secret")
+    if not secret:
+        secret = secrets.token_urlsafe(24)
+        conf["secret"] = secret
+        db.run("UPDATE bots SET extra = ? WHERE id = ?",
+               (json.dumps(conf, ensure_ascii=False), bot_row["id"]))
+
     url = f"{config.PUBLIC_URL}/hook/avito/{bot_row['id']}"
     try:
         async with httpx.AsyncClient(timeout=30) as client:
@@ -208,7 +235,7 @@ async def start_bot(bot_row) -> None:
                 f"{API}/messenger/v3/webhook",
                 headers={"Authorization": f"Bearer {token}",
                          "Content-Type": "application/json"},
-                json={"url": url},
+                json={"url": url, "secret": secret},
             )
             resp.raise_for_status()
         db.run("UPDATE bots SET last_error = NULL WHERE id = ?", (bot_row["id"],))

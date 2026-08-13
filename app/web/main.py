@@ -561,8 +561,18 @@ async def hook_avito(bot_id: int, request: Request):
     row = db.bot(bot_id)
     if row is None or row["platform"] != "avito":
         return JSONResponse({"ok": False}, status_code=404)
-    payload = await request.json()
+
     from ..channels import avito
+    # адрес вебхука угадывается легко, поэтому сверяем секрет из подписки
+    expected = avito.webhook_secret(row)
+    if expected:
+        got = (request.headers.get("x-avito-messenger-signature")
+               or request.headers.get("x-webhook-secret") or "")
+        if got != expected:
+            log.warning("вебхук Авито с чужим секретом отброшен")
+            return JSONResponse({"ok": False}, status_code=403)
+
+    payload = await request.json()
     asyncio.create_task(avito.feed(row, payload))
     return JSONResponse({"ok": True})
 
