@@ -537,6 +537,36 @@ async def hook_max(bot_id: int, request: Request):
     return JSONResponse({"ok": True})
 
 
+@app.post("/hook/vk/{bot_id}")
+async def hook_vk(bot_id: int, request: Request):
+    """Callback API ВК. На запрос confirmation отвечаем строкой из настроек."""
+    row = db.bot(bot_id)
+    if row is None or row["platform"] != "vk":
+        return PlainTextResponse("not found", status_code=404)
+
+    from ..channels import vk
+    event = await request.json()
+
+    if event.get("type") == "confirmation":
+        return PlainTextResponse(vk.settings(row).get("confirm", ""))
+
+    asyncio.create_task(vk.feed(row, event))
+    # ВК ждёт ровно "ok", иначе будет слать событие снова
+    return PlainTextResponse("ok")
+
+
+@app.post("/hook/avito/{bot_id}")
+async def hook_avito(bot_id: int, request: Request):
+    """Уведомления Авито о новых сообщениях в чатах объявлений."""
+    row = db.bot(bot_id)
+    if row is None or row["platform"] != "avito":
+        return JSONResponse({"ok": False}, status_code=404)
+    payload = await request.json()
+    from ..channels import avito
+    asyncio.create_task(avito.feed(row, payload))
+    return JSONResponse({"ok": True})
+
+
 @app.get("/hook/whatsapp")
 async def hook_whatsapp_verify(request: Request):
     """Meta проверяет адрес GET-запросом и ждёт обратно hub.challenge."""
@@ -564,19 +594,42 @@ async def bots_page(request: Request):
 
 @app.post("/bots/add")
 async def bots_add(title: str = Form(""), token: str = Form(...),
-                   role: str = Form("sales"), platform: str = Form("tg")):
+                   role: str = Form("sales"), platform: str = Form("tg"),
+                   confirm: str = Form(""), login: str = Form(""),
+                   imap_host: str = Form(""), smtp_host: str = Form(""),
+                   secret: str = Form("")):
     """Добавить бота по токену. Токен проверяем до сохранения."""
     token = token.strip()
-    platform = platform if platform in ("tg", "max") else "tg"
-    probe = await channels.check_token(platform, token)
+    platform = platform if platform in ("tg", "max", "vk", "mail", "avito") else "tg"
+
+    conf = {}
+    if platform == "mail":
+        conf = {"login": login.strip(),
+                "imap_host": imap_host.strip() or f"imap.{login.split('@')[-1]}",
+                "imap_port": 993,
+                "smtp_host": smtp_host.strip() or f"smtp.{login.split('@')[-1]}",
+                "smtp_port": 465}
+    elif platform == "avito":
+        conf = {"client_secret": secret.strip()}
+    probe = await channels.check_token(platform, token, conf)
     if not probe["ok"]:
         return RedirectResponse(f"/bots?error={probe['error'][:120]}", status_code=303)
 
     if db.q1("SELECT 1 FROM bots WHERE token = ?", (token,)):
         return RedirectResponse("/bots?error=такой+бот+уже+добавлен", status_code=303)
 
+    # у ВК свои настройки: id сообщества и строка подтверждения для Callback
+    extra = None
+    if platform == "vk":
+        extra = json.dumps({"group_id": probe.get("group_id"),
+                            "confirm": confirm.strip()}, ensure_ascii=False)
+    elif platform in ("mail", "avito"):
+        if platform == "avito":
+            conf["user_id"] = probe.get("user_id")
+        extra = json.dumps(conf, ensure_ascii=False)
+
     db.add_bot(title.strip() or f"@{probe['username']}", token,
-               role if role in ("sales", "manager") else "sales", platform)
+               role if role in ("sales", "manager") else "sales", platform, extra)
     await channels.reload_all()
     return RedirectResponse("/bots", status_code=303)
 

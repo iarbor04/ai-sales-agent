@@ -73,6 +73,7 @@ SCHEMA = [
         token TEXT NOT NULL UNIQUE,
         role TEXT NOT NULL DEFAULT 'sales',
         platform TEXT NOT NULL DEFAULT 'tg',
+        extra TEXT,
         username TEXT,
         enabled INTEGER NOT NULL DEFAULT 1,
         greeting TEXT,
@@ -260,6 +261,7 @@ LATE_COLUMNS = [
     ("contacts", "bot_id", "INTEGER"),
     ("contacts", "step", "INTEGER NOT NULL DEFAULT 0"),
     ("bots", "platform", "TEXT NOT NULL DEFAULT 'tg'"),
+    ("bots", "extra", "TEXT"),
     ("bots", "script_enabled", "INTEGER NOT NULL DEFAULT 0"),
     ("bots", "greeting", "TEXT"),
     ("bots", "last_error", "TEXT"),
@@ -361,6 +363,7 @@ DEFAULT_SETTINGS = {
     "rivals_notify": "1",
     # онлайн-запись
     # чат для сайта
+    "mail_subject": "Ваш вопрос",
     "widget_enabled": "1",
     "widget_title": "Чат с консультантом",
     "widget_color": "#0a7c47",
@@ -622,11 +625,12 @@ def bot(bot_id: int) -> sqlite3.Row | None:
 
 
 def add_bot(title: str, token: str, role: str = "sales",
-            platform: str = "tg") -> int:
+            platform: str = "tg", extra: str | None = None) -> int:
+    """extra — настройки конкретной платформы в JSON (id сообщества и прочее)."""
     return run(
-        "INSERT INTO bots (title, token, role, platform, created_at)"
-        " VALUES (?, ?, ?, ?, ?)",
-        (title, token.strip(), role, platform, now()),
+        "INSERT INTO bots (title, token, role, platform, extra, created_at)"
+        " VALUES (?, ?, ?, ?, ?, ?)",
+        (title, token.strip(), role, platform, extra, now()),
     )
 
 

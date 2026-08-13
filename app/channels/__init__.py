@@ -13,12 +13,30 @@ def max_enabled() -> bool:
     return any(b["platform"] == "max" for b in db.bots(only_enabled=True))
 
 
+def vk_enabled() -> bool:
+    return any(b["platform"] == "vk" for b in db.bots(only_enabled=True))
+
+
+def mail_enabled() -> bool:
+    return any(b["platform"] == "mail" for b in db.bots(only_enabled=True))
+
+
+def avito_enabled() -> bool:
+    return any(b["platform"] == "avito" for b in db.bots(only_enabled=True))
+
+
 def active() -> list[str]:
     channels = []
     if telegram_enabled():
         channels.append("tg")
     if max_enabled():
         channels.append("max")
+    if vk_enabled():
+        channels.append("vk")
+    if mail_enabled():
+        channels.append("mail")
+    if avito_enabled():
+        channels.append("avito")
     if config.whatsapp_enabled():
         channels.append("wa")
     from . import web as webchat
@@ -43,45 +61,64 @@ def adopt_env_token() -> None:
 
 # ── общий подъём каналов ───────────────────────────────────────────────
 
+# платформы, у которых свой модуль со start_bot/stop_bot/live
+EXTRA_PLATFORMS = ("max", "vk", "mail", "avito")
+
+
+def _module(platform: str):
+    from . import avito, mail, maxru, vk
+    return {"max": maxru, "vk": vk, "mail": mail, "avito": avito}[platform]
+
+
 async def start_all() -> None:
     """Поднять ботов всех платформ."""
-    from . import maxru, telegram
+    from . import telegram
     await telegram.start()
     for row in db.bots(only_enabled=True):
-        if row["platform"] == "max":
-            await maxru.start_bot(row)
+        if row["platform"] in EXTRA_PLATFORMS:
+            await _module(row["platform"]).start_bot(row)
 
 
 async def reload_all() -> None:
     """Привести живых ботов в соответствие с базой — после правок в панели."""
-    from . import maxru, telegram
+    from . import telegram
     await telegram.reload()
 
-    wanted = {r["id"]: r for r in db.bots(only_enabled=True) if r["platform"] == "max"}
-    for bot_id in list(maxru.live()):
-        if bot_id not in wanted:
-            await maxru.stop_bot(bot_id)
-    for bot_id, row in wanted.items():
-        if bot_id not in maxru.live():
-            await maxru.start_bot(row)
+    for platform in EXTRA_PLATFORMS:
+        module = _module(platform)
+        wanted = {r["id"]: r for r in db.bots(only_enabled=True)
+                  if r["platform"] == platform}
+        for bot_id in list(module.live()):
+            if bot_id not in wanted:
+                await module.stop_bot(bot_id)
+        for bot_id, row in wanted.items():
+            if bot_id not in module.live():
+                await module.start_bot(row)
 
 
 async def stop_all() -> None:
-    from . import maxru, telegram
+    from . import telegram
     await telegram.stop()
-    for bot_id in list(maxru.live()):
-        await maxru.stop_bot(bot_id)
+    for platform in EXTRA_PLATFORMS:
+        module = _module(platform)
+        for bot_id in list(module.live()):
+            await module.stop_bot(bot_id)
 
 
-async def check_token(platform: str, token: str) -> dict:
-    """Проверить токен до сохранения — у каждой платформы свой способ."""
-    from . import maxru, telegram
-    if platform == "max":
-        return await maxru.check_token(token)
+async def check_token(platform: str, token: str, conf: dict | None = None) -> dict:
+    """Проверить доступ до сохранения — у каждой платформы свой способ."""
+    from . import telegram
+    if platform in ("mail", "avito"):
+        return await _module(platform).check_token(token, conf or {})
+    if platform in EXTRA_PLATFORMS:
+        return await _module(platform).check_token(token)
     return await telegram.check_token(token)
 
 
 def live_ids() -> set[int]:
     """Кто сейчас на связи — для отметки в панели."""
-    from . import maxru, telegram
-    return set(telegram.BOTS) | maxru.live()
+    from . import telegram
+    ids = set(telegram.BOTS)
+    for platform in EXTRA_PLATFORMS:
+        ids |= _module(platform).live()
+    return ids

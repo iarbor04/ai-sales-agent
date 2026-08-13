@@ -18,15 +18,32 @@
         <select name="platform">
           <option value="tg">Telegram — токен у @BotFather</option>
           <option value="max">MAX — токен у @MasterBot</option>
+          <option value="vk">ВКонтакте — ключ сообщества</option>
+          <option value="mail">Почта — пароль приложения</option>
+          <option value="avito">Авито — client_id и secret</option>
         </select></div>
       <div class="field"><label>Токен бота</label>
-        <input type="text" name="token" placeholder="123456:AA..." required></div>
+        <input type="text" name="token" placeholder="токен или пароль приложения" required></div>
       <div class="field"><label>Роль</label>
         <select name="role">
           <option value="sales">Продажник — говорит с клиентами</option>
           <option value="manager">Менеджерский — уведомления и кнопки</option>
         </select></div>
     </div>
+    <div class="row">
+      <div class="field"><label>Адрес ящика — только для почты</label>
+        <input type="text" name="login" placeholder="sales@example.com"></div>
+      <div class="field"><label>IMAP-сервер</label>
+        <input type="text" name="imap_host" placeholder="определим по домену"></div>
+      <div class="field"><label>SMTP-сервер</label>
+        <input type="text" name="smtp_host" placeholder="определим по домену"></div>
+    </div>
+    <div class="field"><label>client_secret — только для Авито</label>
+      <input type="text" name="secret"
+             placeholder="кабинет продавца → Настройки → Avito API"></div>
+    <div class="field"><label>Строка подтверждения — только для ВКонтакте</label>
+      <input type="text" name="confirm"
+             placeholder="из настроек сообщества → Работа с API → Callback API"></div>
     <div class="row between">
       <span class="muted small">Токен проверяется до сохранения: неживой не добавится.</span>
       <button class="btn" type="submit">Добавить</button>
@@ -40,7 +57,7 @@
     <div class="row between">
       <h2 style="margin:0">
         {{ b.title }}
-        <span class="pill">{{ 'MAX' if b.platform == 'max' else 'Telegram' }}</span>
+        <span class="pill">{{ {'max':'MAX','vk':'ВКонтакте','mail':'Почта','avito':'Авито'}.get(b.platform, 'Telegram') }}</span>
         {% if b.username %}<span class="muted small">@{{ b.username }}</span>{% endif %}
       </h2>
       <div>
@@ -89,7 +106,7 @@
     </label>
 
     {% if mode == 'webhook' %}
-    <p class="muted small">Вебхук: <code>{{ public_url }}/hook/{{ 'max' if b.platform == 'max' else 'telegram' }}/{{ b.id }}</code></p>
+    <p class="muted small">Вебхук: <code>{{ public_url }}/hook/{{ {'max':'max','vk':'vk','avito':'avito'}.get(b.platform, 'telegram') }}/{{ b.id }}</code></p>
     {% endif %}
 
     <div class="row between" style="margin-top:10px">

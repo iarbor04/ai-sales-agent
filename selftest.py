@@ -191,6 +191,39 @@ def main() -> int:
     db.reorder_script(list(reversed(ids)))
     check("порядок шагов меняется", [s["id"] for s in db.script()] == list(reversed(ids)))
 
+    section("Каналы")
+    from app import config
+    from app.channels import mail, vk
+    need = {"tg", "wa", "max", "vk", "mail", "web", "avito"}
+    check("все каналы названы", need <= set(config.CHANNEL_TITLES),
+          f"нет: {sorted(need - set(config.CHANNEL_TITLES))}")
+
+    vk_bot = db.add_bot("Сообщество", "vk-token", "sales", "vk",
+                        '{"group_id": 42, "confirm": "abc123"}')
+    row = db.bot(vk_bot)
+    check("настройки ВК читаются", vk.settings(row).get("confirm") == "abc123")
+
+    mail_bot = db.add_bot("Ящик", "app-password", "sales", "mail",
+                          '{"login": "sales@example.com", "imap_host": "imap.example.com"}')
+    check("настройки почты читаются",
+          mail.settings(db.bot(mail_bot)).get("login") == "sales@example.com")
+    check("цитата из письма отрезается",
+          mail._trim_quote("Мой вопрос\n\n> старое письмо\n> ещё строка") == "Мой вопрос")
+    check("тема письма расшифровывается",
+          mail._decode("=?utf-8?B?0J/RgNC40LLQtdGC?=") == "Привет")
+
+    from app.channels import avito
+    parsed = avito._extract({"payload": {"type": "message", "value": {
+        "chat_id": "c1", "author_id": 55, "content": {"text": "Ещё продаёте?"}}}})
+    check("вебхук Авито разбирается",
+          parsed and parsed["chat_id"] == "c1" and parsed["text"] == "Ещё продаёте?")
+    check("не-сообщения от Авито пропускаются",
+          avito._extract({"payload": {"type": "read", "value": {}}}) is None)
+
+    from app import channels as ch
+    check("каждая платформа знает свой модуль",
+          all(ch._module(p) is not None for p in ch.EXTRA_PLATFORMS))
+
     section("Чат для сайта")
     from app.channels import web as webchat
     token = webchat.new_visitor()

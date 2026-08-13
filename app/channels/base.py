@@ -69,6 +69,27 @@ async def send(contact_id: int, text: str, media_path: str | None = None,
         from . import web as webchat
         # для сайта отправка = запись в базу, виджет заберёт её опросом
         ok, status = await webchat.send(contact_id, text, media_path, button)
+    elif channel == "avito":
+        from . import avito
+        row = db.bot(contact["bot_id"]) if contact["bot_id"] else None
+        ok, status = await avito.send(
+            contact["external_id"], text, media_path, button,
+            bot_row=row, kind=kind,
+        )
+    elif channel == "mail":
+        from . import mail
+        row = db.bot(contact["bot_id"]) if contact["bot_id"] else None
+        ok, status = await mail.send(
+            contact["external_id"], text, media_path, button,
+            bot_row=row, kind=kind,
+        )
+    elif channel == "vk":
+        from . import vk
+        row = db.bot(contact["bot_id"]) if contact["bot_id"] else None
+        ok, status = await vk.send(
+            contact["external_id"], text, media_path, button,
+            token=row["token"] if row else None, kind=kind,
+        )
     elif channel == "max":
         from . import maxru
         row = db.bot(contact["bot_id"]) if contact["bot_id"] else None
