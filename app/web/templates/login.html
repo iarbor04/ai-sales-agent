@@ -4,10 +4,12 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Вход · ИИ-продажник</title>
+  <link rel="icon" type="image/png" href="/static/favicon.png">
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body class="center">
   <form method="post" action="/login" class="card login">
+    <img src="/static/logo.webp" alt="ASCN.AI" class="logo">
     <h1>ИИ-продажник</h1>
     <p class="tag">Панель управления</p>
     {% if error %}<p class="err">{{ error }}</p>{% endif %}

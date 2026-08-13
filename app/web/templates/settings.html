@@ -57,10 +57,7 @@
     {% endif %}
     <div class="field">
       <label>Модель для ответов</label>
-      <input type="search" id="msearch" placeholder="поиск: claude, gpt, gemini, llama…"
-             oninput="filterModels()" style="margin-bottom:8px"
-             {{ 'disabled' if not models }}>
-      <select name="model" id="mselect" size="8">
+      <select name="model" id="mselect">
         {% for m in models %}
         <option value="{{ m.id }}" {{ 'selected' if values.model == m.id }}>{{ m.id }}</option>
         {% else %}
@@ -68,12 +65,9 @@
         {% endfor %}
       </select>
       <span class="note" id="mcount">
-        {% if models %}
-          Доступно моделей: {{ models | length }}. Выбрана: <b>{{ values.model }}</b>
-        {% else %}
-          Список появится после сохранения ключа. Пока используется:
-          <b>{{ values.model }}</b>
-        {% endif %}
+        {% if models %}Доступно моделей: {{ models | length }}.
+        {% else %}Список подгрузится, как только сохраните ключ.{% endif %}
+        Дешевле и быстрее — модели с пометкой mini или flash.
       </span>
     </div>
     <label class="check">
@@ -135,42 +129,28 @@
 </form>
 
 <script>
-let allModels = [];
-
+// Список моделей у OpenRouter длинный, но грузим его целиком: владельцу
+// нужен именно выбор, а не наш короткий список «рекомендованного».
 async function loadModels() {
   const select = document.getElementById('mselect');
-  if (select.options.length > 1) {
-    allModels = Array.from(select.options).map(o => o.value);
-    return;
-  }
+  if (select.options.length > 1) return;
+
   const resp = await fetch('/api/models');
   const rows = await resp.json();
   if (!rows.length) return;
-  allModels = rows.map(r => r.id);
-  render(allModels);
-  document.getElementById('msearch').disabled = false;
-  document.getElementById('mcount').innerHTML =
-    'Доступно моделей: <b>' + allModels.length + '</b>';
-}
 
-function render(list) {
-  const select = document.getElementById('mselect');
   const chosen = select.value;
   select.innerHTML = '';
-  list.forEach(id => {
+  rows.forEach(row => {
     const opt = document.createElement('option');
-    opt.value = id; opt.textContent = id;
-    if (id === chosen) opt.selected = true;
+    opt.value = row.id;
+    opt.textContent = row.id;
+    if (row.id === chosen) opt.selected = true;
     select.appendChild(opt);
   });
-}
-
-function filterModels() {
-  const q = document.getElementById('msearch').value.toLowerCase().trim();
-  const list = q ? allModels.filter(id => id.toLowerCase().includes(q)) : allModels;
-  render(list);
   document.getElementById('mcount').innerHTML =
-    'Показано: <b>' + list.length + '</b> из ' + allModels.length;
+    'Доступно моделей: <b>' + rows.length + '</b>. ' +
+    'Дешевле и быстрее — модели с пометкой mini или flash.';
 }
 
 async function checkSheets() {
