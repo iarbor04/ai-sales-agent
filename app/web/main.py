@@ -26,7 +26,8 @@ from fastapi.templating import Jinja2Templates
 from itsdangerous import BadSignature, URLSafeSerializer
 
 from .. import (
-    broadcast, config, db, knowledge, llm, retrieval, sales, scheduler, sheets,
+    broadcast, config, db, knowledge, llm, onboarding, retrieval, sales,
+    scheduler, sheets,
 )
 from .. import channels
 from ..channels import base, telegram, whatsapp
@@ -85,6 +86,7 @@ def page(request: Request, name: str, **ctx) -> HTMLResponse:
     ctx.setdefault("req_statuses", db.REQUEST_STATUSES)
     ctx.setdefault("channels", config.CHANNEL_TITLES)
     ctx.setdefault("ai_on", db.setting("ai_enabled_global", "1") == "1")
+    ctx.setdefault("setup", onboarding.progress())
     ctx.setdefault("path", request.url.path)
     return templates.TemplateResponse(request, name, ctx)
 
@@ -142,6 +144,19 @@ async def media(name: str):
     if not path.exists():
         return PlainTextResponse("нет файла", status_code=404)
     return FileResponse(path)
+
+
+@app.get("/onboarding", response_class=HTMLResponse)
+async def onboarding_page(request: Request):
+    return page(request, "onboarding.html")
+
+
+# ── все модели для выпадающего списка ──────────────────────────────────
+
+@app.get("/api/models")
+async def api_models():
+    """Полный список моделей OpenRouter — панель фильтрует его на месте."""
+    return JSONResponse(await llm.available_models())
 
 
 # ── дашборд ────────────────────────────────────────────────────────────
@@ -268,9 +283,29 @@ async def lead_save(request: Request):
 
 @app.get("/knowledge", response_class=HTMLResponse)
 async def kb_page(request: Request):
-    pages = db.q("SELECT * FROM kb_pages ORDER BY included DESC, chars DESC, url LIMIT 500")
+    pages = db.q(
+        "SELECT * FROM kb_pages WHERE url NOT LIKE 'manual://%' AND url NOT LIKE 'sheet://%'"
+        " ORDER BY included DESC, chars DESC, url LIMIT 500"
+    )
+    sheet = db.q1("SELECT * FROM kb_pages WHERE url = 'sheet://knowledge'")
     return page(request, "knowledge.html", pages=pages, stats=knowledge.stats(),
-                site=db.setting("business_site", ""), extra=db.setting("kb_extra", ""))
+                site=db.setting("business_site", ""), extra=db.setting("kb_extra", ""),
+                sheet_url=db.setting("sheets_kb_url", ""), sheet=sheet)
+
+
+@app.post("/knowledge/sheet")
+async def kb_sheet(url: str = Form("")):
+    """Таблица — такой же источник знаний, как сайт. Живёт здесь же."""
+    db.set_setting("sheets_kb_url", url.strip())
+    if url.strip():
+        await asyncio.to_thread(sheets.sync_knowledge)
+    else:
+        row = db.q1("SELECT id FROM kb_pages WHERE url = 'sheet://knowledge'")
+        if row:
+            db.run("DELETE FROM kb_chunks WHERE page_id = ?", (row["id"],))
+            db.run("DELETE FROM kb_pages WHERE id = ?", (row["id"],))
+    retrieval.invalidate()
+    return RedirectResponse("/knowledge", status_code=303)
 
 
 @app.post("/knowledge/discover")

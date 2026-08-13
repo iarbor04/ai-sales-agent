@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+{% block title %}Настройка · ИИ-продажник{% endblock %}
+{% block body %}
+<div class="topbar">
+  <div style="flex:1">
+    <h1>Настройка</h1>
+    <p class="sub">Пять минут — и продажник начнёт отвечать клиентам сам.</p>
+  </div>
+</div>
+
+<div class="card setup">
+  <div class="row between">
+    <h2 style="margin:0">
+      {% if setup.ready %}Всё готово{% else %}Готово {{ setup.done }} из {{ setup.total }}{% endif %}
+    </h2>
+    {% if setup.ready %}<span class="pill ok">агент работает</span>{% endif %}
+  </div>
+  <div class="bar"><i style="width: {{ (setup.done / setup.total * 100) | round }}%"></i></div>
+
+  <div class="steps">
+    {% for s in setup.steps %}
+    <div class="step {{ 'done' if s.done }}{{ ' now' if setup.next and setup.next.key == s.key }}">
+      <div class="mark">{{ '✓' if s.done else loop.index }}</div>
+      <div class="body">
+        <div class="t">
+          {{ s.title }}
+          {% if s.optional %}<span class="pill off">по желанию</span>{% endif %}
+          <span class="pill {{ 'ok' if s.done else 'warn' }}">{{ s.state }}</span>
+        </div>
+        <div class="why">{{ s.why }}</div>
+        <div class="how">{{ s.how }}</div>
+      </div>
+      <div class="side-act">
+        <a class="btn {{ 'ghost' if s.done else '' }} small" href="{{ s.link }}">{{ s.action }}</a>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+
+<div class="grid c2">
+  <div class="card">
+    <h2>Как это работает</h2>
+    <p class="muted" style="margin-top:0">
+      Клиент пишет вашему боту в Telegram. Агент отвечает <b>только</b> по тому,
+      что вы загрузили в базу знаний — цены и сроки он не выдумывает. По ходу
+      разговора собирает имя, что нужно и контакт, и складывает это в карточку лида.
+    </p>
+    <p class="muted">
+      Как только клиент просит человека, готов покупать, жалуется или задаёт
+      вопрос, ответа на который нет в базе, — агент замолкает и зовёт менеджера.
+      Обращение попадает в раздел «Обращения» и приходит в Telegram с кнопками.
+    </p>
+    <p class="muted" style="margin-bottom:0">
+      Менеджер отвечает из раздела «Диалоги», а клиент получает ответ там же,
+      где написал. Кнопка «Вернуть ИИ» возвращает агента в разговор — он помнит
+      всю переписку.
+    </p>
+  </div>
+
+  <div class="card">
+    <h2>Что где лежит</h2>
+    <table>
+      <tr><td><a href="/dialogs">Диалоги</a></td>
+          <td class="muted small">переписка с клиентами, ответ менеджера</td></tr>
+      <tr><td><a href="/requests">Обращения</a></td>
+          <td class="muted small">кому нужен человек прямо сейчас</td></tr>
+      <tr><td><a href="/leads">Лиды</a></td>
+          <td class="muted small">карточки: что нужно клиенту и на каком он этапе</td></tr>
+      <tr><td><a href="/knowledge">База знаний</a></td>
+          <td class="muted small">откуда агент берёт ответы</td></tr>
+      <tr><td><a href="/script">Сценарий</a></td>
+          <td class="muted small">что и в каком порядке он выясняет</td></tr>
+      <tr><td><a href="/broadcast">Рассылки</a></td>
+          <td class="muted small">сообщение всем подписчикам бота</td></tr>
+      <tr><td><a href="/bots">Боты</a></td>
+          <td class="muted small">подключение Telegram-ботов</td></tr>
+    </table>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Частые вопросы новичка</h2>
+  <table>
+    <tr>
+      <td style="width:38%"><b>Где взять токен бота?</b></td>
+      <td class="muted small">
+        В Telegram найдите @BotFather, отправьте <code>/newbot</code>, придумайте имя.
+        Он пришлёт строку вида <code>123456:AAH...</code> — это и есть токен.
+        Вставьте её в разделе «Боты».
+      </td>
+    </tr>
+    <tr>
+      <td><b>Зачем второй бот?</b></td>
+      <td class="muted small">
+        Первый говорит с клиентами. Второй, с ролью «менеджерский», нужен
+        менеджерам: в него приходят обращения с кнопками «Взять в работу»
+        и «Передать». Без него уведомления просто не придут.
+      </td>
+    </tr>
+    <tr>
+      <td><b>Что такое ключ OpenRouter?</b></td>
+      <td class="muted small">
+        Это доступ к модели, которая пишет ответы. Регистрируетесь на openrouter.ai,
+        пополняете баланс, создаёте ключ в разделе Keys и вставляете в Настройках.
+        Оплата идёт за использование, отдельной подписки нет.
+      </td>
+    </tr>
+    <tr>
+      <td><b>Агент может наврать клиенту?</b></td>
+      <td class="muted small">
+        Он отвечает только по базе знаний. Если ответа там нет — не выдумывает,
+        а зовёт менеджера. Поэтому важно загрузить туда прайс и условия:
+        чем полнее база, тем реже агент дёргает людей.
+      </td>
+    </tr>
+    <tr>
+      <td><b>Клиент попросил не писать — что будет?</b></td>
+      <td class="muted small">
+        Слова «стоп» и «не пишите» выключают ИИ в этом диалоге и убирают
+        человека из рассылок. Включить обратно можно кнопкой в диалоге.
+      </td>
+    </tr>
+    <tr>
+      <td><b>Сколько вопросов задаёт агент?</b></td>
+      <td class="muted small">
+        Не больше пяти за разговор — дальше люди просто уходят. Собрал главное —
+        передаёт менеджеру вместе с кратким резюме.
+      </td>
+    </tr>
+  </table>
+</div>
+{% endblock %}

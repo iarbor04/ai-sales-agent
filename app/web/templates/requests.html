@@ -3,7 +3,7 @@
 {% block body %}
 <div class="topbar">
   <h1>Обращения</h1>
-  <div class="botswitch">
+  <div class="tabs">
     <a href="/requests" class="{{ 'on' if not current }}">все</a>
     {% for key, label in req_statuses.items() %}
     <a href="/requests?status={{ key }}" class="{{ 'on' if current == key }}">{{ label }}</a>

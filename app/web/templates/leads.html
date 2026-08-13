@@ -3,7 +3,7 @@
 {% block body %}
 <div class="topbar">
   <h1>Лиды</h1>
-  <div class="botswitch">
+  <div class="tabs">
     <a href="/leads" class="{{ 'on' if not current }}">все</a>
     {% for key, label in statuses.items() %}
     <a href="/leads?status={{ key }}" class="{{ 'on' if current == key }}">{{ label }}</a>

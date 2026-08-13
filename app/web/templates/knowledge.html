@@ -1,82 +1,142 @@
 {% extends "base.html" %}
 {% block title %}База знаний · ИИ-продажник{% endblock %}
 {% block body %}
-<div class="topbar"><h1>База знаний</h1></div>
+<div class="topbar">
+  <div style="flex:1">
+    <h1>База знаний</h1>
+    <p class="sub">Отсюда агент берёт ответы. Чего здесь нет — он не скажет,
+      а позовёт менеджера.</p>
+  </div>
+</div>
+
+<div class="grid c4">
+  <div class="stat"><div class="n">{{ stats.loaded }}</div><div class="l">источников загружено</div></div>
+  <div class="stat"><div class="n">{{ stats.chunks }}</div><div class="l">фрагментов для поиска</div></div>
+  <div class="stat"><div class="n">{{ stats.total }}</div><div class="l">страниц найдено</div></div>
+  <div class="stat"><div class="n">{{ stats.included }}</div><div class="l">включено</div></div>
+</div>
 
 <div class="card">
-  <h2>Шаг 1. Найти страницы сайта</h2>
-  <form method="post" action="/knowledge/discover" class="row">
-    <input type="text" name="site" value="{{ site }}" placeholder="example.com">
-    <button class="btn" type="submit">Найти страницы</button>
-  </form>
-  <p class="muted small">
-    Обходим только внутренние публичные страницы этого домена.
-    Недоступные пропускаем и идём дальше.
+  <h2>Google Таблица <span class="hint">самый удобный способ для прайса</span></h2>
+  <p class="lead-text">
+    Держите цены и условия в таблице — правите их сами, агент подхватывает
+    изменения. Каждая строка становится фактом: заголовки столбцов и значения.
+    Подойдёт и таблица «вопрос / ответ», и прайс на десять колонок.
   </p>
+  <form method="post" action="/knowledge/sheet">
+    <div class="row">
+      <div class="field">
+        <label>Ссылка на таблицу</label>
+        <input type="text" name="url" value="{{ sheet_url }}"
+          placeholder="https://docs.google.com/spreadsheets/d/...">
+      </div>
+      <button class="btn" type="submit">
+        {{ 'Обновить' if sheet_url else 'Подключить' }}
+      </button>
+    </div>
+  </form>
+  {% if sheet %}
+  <div class="callout">
+    <b>Подключена.</b> Загружено {{ sheet.chars }} символов,
+    обновлено {{ sheet.fetched_at | dt }}. Перечитывается автоматически раз в полчаса.
+  </div>
+  {% else %}
+  <div class="callout">
+    <b>Как открыть доступ:</b> в таблице Файл → Поделиться → Опубликовать в интернете →
+    Опубликовать. Скопируйте ссылку сюда. Ключи и настройки Google не нужны.
+    Учтите: опубликованную таблицу может открыть любой, у кого есть ссылка —
+    личные данные туда не кладите.
+  </div>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>Сайт компании</h2>
+  <p class="lead-text">
+    Подходит для описательного: о компании, услуги, доставка, гарантии.
+    Обходим только внутренние страницы этого домена; недоступные пропускаем.
+  </p>
+  <form method="post" action="/knowledge/discover" class="row">
+    <div class="field">
+      <label>Домен</label>
+      <input type="text" name="site" value="{{ site }}" placeholder="example.com">
+    </div>
+    <button class="btn ghost" type="submit">Найти страницы</button>
+  </form>
 </div>
 
 {% if pages %}
 <div class="card">
-  <h2>Шаг 2. Убрать лишнее и загрузить</h2>
-  <p class="muted small">
-    Найдено {{ stats.total }}, включено {{ stats.included }}, загружено {{ stats.loaded }},
-    фрагментов для поиска {{ stats.chunks }}.
-  </p>
+  <h2>Страницы сайта <span class="hint">снимите галочку с лишних и сохраните</span></h2>
   <form method="post" action="/knowledge/select">
     <table>
-      <tr><th style="width:40px"></th><th>Страница</th><th>Символов</th><th>Статус</th></tr>
+      <tr><th style="width:44px"></th><th>Страница</th>
+          <th style="width:110px">Символов</th><th style="width:130px">Статус</th></tr>
       {% for p in pages %}
       <tr>
         <td><input type="checkbox" name="page_{{ p.id }}" {{ 'checked' if p.included }}></td>
         <td>
           {{ p.title or p.url }}
-          <div class="small muted">{{ p.url }}</div>
+          <div class="small dim">{{ p.url }}</div>
         </td>
         <td>{{ p.chars or '—' }}</td>
         <td>
           {% if p.status == 'loaded' %}<span class="pill ok">загружена</span>
-          {% elif p.status == 'error' %}<span class="pill warn">недоступна</span>
-          {% else %}<span class="pill">найдена</span>{% endif %}
+          {% elif p.status == 'error' %}<span class="pill bad">недоступна</span>
+          {% else %}<span class="pill">не загружена</span>{% endif %}
         </td>
       </tr>
       {% endfor %}
     </table>
-    <div class="row between" style="margin-top:12px">
-      <span class="muted small">Снятая галочка убирает страницу из базы знаний.</span>
-      <button class="btn" type="submit">Сохранить и загрузить включённые</button>
+    <div class="row between" style="margin-top:14px">
+      <span class="dim small">Выкидывайте блог и новости — они только мешают агенту.</span>
+      <button class="btn" type="submit">Сохранить и загрузить</button>
     </div>
   </form>
 </div>
 {% endif %}
 
 <div class="card">
-  <h2>Вписать вручную</h2>
+  <h2>Вписать руками</h2>
+  <p class="lead-text">
+    Всё, чего нет ни на сайте, ни в таблице: условия оплаты, частые вопросы,
+    что отвечать на возражения.
+  </p>
   <form method="post" action="/knowledge/extra">
     <div class="field">
-      <textarea name="text" style="min-height:180px"
-        placeholder="Прайс, условия доставки, частые вопросы — всё, чего нет на сайте">{{ extra }}</textarea>
+      <textarea name="text" style="min-height:170px"
+        placeholder="Доставка по городу — 500 ₽, 1–2 дня.&#10;Рассрочка на 6 месяцев без процентов.&#10;Гарантия на каркас — 18 месяцев.">{{ extra }}</textarea>
     </div>
-    <button class="btn" type="submit">Сохранить</button>
+    <button class="btn ghost" type="submit">Сохранить</button>
   </form>
 </div>
 
 <div class="card">
-  <h2>Проверить</h2>
+  <h2>Проверить, что найдёт агент</h2>
+  <p class="lead-text">
+    Задайте вопрос как клиент. Если ничего не нашлось — на такой вопрос агент
+    отвечать не станет и передаст диалог менеджеру.
+  </p>
   <div class="row">
-    <input type="text" id="q" placeholder="Например: сколько стоит доставка?">
-    <button class="btn ghost" onclick="testKb()">Что найдёт агент</button>
+    <div class="field">
+      <input type="text" id="q" placeholder="Сколько стоит доставка?"
+             onkeydown="if(event.key==='Enter'){event.preventDefault();testKb()}">
+    </div>
+    <button class="btn ghost" onclick="testKb()">Проверить</button>
   </div>
-  <pre id="out" class="out"></pre>
+  <pre id="out" class="out" style="display:none"></pre>
 </div>
 
 <script>
 async function testKb() {
-  const q = document.getElementById('q').value;
-  const resp = await fetch('/knowledge/test?q=' + encodeURIComponent(q));
-  const rows = await resp.json();
   const out = document.getElementById('out');
-  if (!rows.length) { out.textContent = 'Ничего не нашлось — агент передаст диалог менеджеру.'; return; }
-  out.textContent = rows.map(r => '[' + r.score + '] ' + (r.title || r.url) + '\n' + r.text.slice(0, 400)).join('\n\n');
+  out.style.display = 'block';
+  out.textContent = 'ищу…';
+  const resp = await fetch('/knowledge/test?q=' + encodeURIComponent(document.getElementById('q').value));
+  const rows = await resp.json();
+  out.textContent = rows.length
+    ? rows.map(r => '● ' + (r.title || r.url) + '\n' + r.text.slice(0, 400)).join('\n\n')
+    : 'Ничего не нашлось. На такой вопрос агент позовёт менеджера.';
 }
 </script>
 {% endblock %}

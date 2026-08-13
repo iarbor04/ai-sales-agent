@@ -9,6 +9,7 @@
 <body class="center">
   <form method="post" action="/login" class="card login">
     <h1>ИИ-продажник</h1>
+    <p class="tag">Панель управления</p>
     {% if error %}<p class="err">{{ error }}</p>{% endif %}
     <div class="field">
       <label>Логин</label>
@@ -18,7 +19,7 @@
       <label>Пароль</label>
       <input type="password" name="password" autocomplete="current-password">
     </div>
-    <button class="btn" type="submit">Войти</button>
+    <button class="btn block" type="submit">Войти</button>
   </form>
 </body>
 </html>

@@ -1,26 +1,48 @@
 {% extends "base.html" %}
 {% block title %}Обзор · ИИ-продажник{% endblock %}
 {% block body %}
-<div class="topbar"><h1>Обзор</h1></div>
+<div class="topbar">
+  <div style="flex:1">
+    <h1>Обзор</h1>
+    <p class="sub">
+      {% if setup.ready %}Агент работает. Здесь видно, что происходит.
+      {% else %}Осталось несколько шагов до запуска.{% endif %}
+    </p>
+  </div>
+</div>
 
-{% if not kb.loaded %}
-<div class="card warn">
-  <b>База знаний пуста.</b> Агент пока не может отвечать по информации бизнеса
-  и будет передавать все диалоги менеджеру.
-  <a href="/knowledge">Заполнить базу знаний</a>
+{% if not setup.ready %}
+<div class="card setup">
+  <div class="row between">
+    <h2 style="margin:0">Настройка — готово {{ setup.done }} из {{ setup.total }}</h2>
+    <a class="btn small" href="/onboarding">Продолжить настройку</a>
+  </div>
+  <div class="bar"><i style="width: {{ (setup.done / setup.total * 100) | round }}%"></i></div>
+  {% if setup.next %}
+  <div class="step now">
+    <div class="mark">→</div>
+    <div class="body">
+      <div class="t">Дальше: {{ setup.next.title }}</div>
+      <div class="why">{{ setup.next.why }}</div>
+    </div>
+    <div class="side-act">
+      <a class="btn ghost small" href="{{ setup.next.link }}">{{ setup.next.action }}</a>
+    </div>
+  </div>
+  {% endif %}
 </div>
 {% endif %}
 
 <div class="grid c4">
-  <div class="stat"><div class="n">{{ stats.contacts }}</div><div class="l">контактов</div></div>
-  <div class="stat"><div class="n">{{ stats.leads }}</div><div class="l">лидов</div></div>
-  <div class="stat"><div class="n">{{ stats.handed }}</div><div class="l">у менеджера</div></div>
+  <div class="stat"><div class="n">{{ stats.contacts }}</div><div class="l">клиентов написало</div></div>
+  <div class="stat"><div class="n">{{ stats.leads }}</div><div class="l">карточек лидов</div></div>
+  <div class="stat"><div class="n">{{ stats.handed }}</div><div class="l">ждут менеджера</div></div>
   <div class="stat"><div class="n">{{ stats.audience }}</div><div class="l">подписчиков бота</div></div>
 </div>
 
 <div class="grid c2">
   <div class="card">
-    <h2>Лиды по статусам</h2>
+    <h2>Лиды по этапам</h2>
     <table>
       {% for key, label in statuses.items() %}
       <tr>
@@ -29,16 +51,32 @@
       </tr>
       {% endfor %}
     </table>
+    <div class="callout">
+      Карточка заводится сама, когда агент узнал о клиенте хотя бы пару вещей.
+      Повторное сообщение второй карточки не создаёт.
+    </div>
   </div>
 
   <div class="card">
     <h2>База знаний</h2>
+    {% if kb.loaded %}
     <table>
-      <tr><td>Найдено страниц</td><td class="right"><b>{{ kb.total }}</b></td></tr>
-      <tr><td>Включено</td><td class="right"><b>{{ kb.included }}</b></td></tr>
-      <tr><td>Загружено</td><td class="right"><b>{{ kb.loaded }}</b></td></tr>
+      <tr><td>Источников загружено</td><td class="right"><b>{{ kb.loaded }}</b></td></tr>
       <tr><td>Фрагментов для поиска</td><td class="right"><b>{{ kb.chunks }}</b></td></tr>
+      <tr><td>Страниц найдено</td><td class="right"><b>{{ kb.total }}</b></td></tr>
     </table>
+    <div class="callout">
+      Чем полнее база, тем реже агент дёргает людей.
+      <a href="/knowledge">Проверить, что он находит</a>
+    </div>
+    {% else %}
+    <div class="empty">
+      <div class="big">База пустая</div>
+      <p class="muted">Пока агент не знает о вашем бизнесе ничего и будет
+        передавать менеджеру каждый диалог.</p>
+      <a class="btn small" href="/knowledge">Заполнить</a>
+    </div>
+    {% endif %}
   </div>
 </div>
 
@@ -46,18 +84,27 @@
   <h2>Последние обращения</h2>
   {% if recent %}
   <table>
-    <tr><th>Клиент</th><th>Канал</th><th>Статус</th><th>Когда</th></tr>
+    <tr><th>Клиент</th><th>Канал</th><th>Кто ведёт</th><th>Этап</th><th>Когда</th></tr>
     {% for r in recent %}
     <tr>
       <td><a href="/dialogs?c={{ r.id }}">{{ r.name or r.username or r.phone or 'id' ~ r.id }}</a></td>
-      <td>{{ channels.get(r.channel, r.channel) }}</td>
+      <td class="muted small">{{ channels.get(r.channel, r.channel) }}</td>
+      <td>
+        {% if r.ai_enabled %}<span class="pill ok">ИИ</span>
+        {% else %}<span class="pill warn">{{ r.manager or 'менеджер' }}</span>{% endif %}
+      </td>
       <td>{% if r.lead_status %}<span class="pill">{{ statuses[r.lead_status] }}</span>{% endif %}</td>
-      <td class="muted small">{{ r.last_msg_at | dt }}</td>
+      <td class="dim small">{{ r.last_msg_at | dt }}</td>
     </tr>
     {% endfor %}
   </table>
   {% else %}
-  <p class="muted">Пока никто не написал. Напишите боту сами — диалог появится здесь.</p>
+  <div class="empty">
+    <div class="big">Пока никто не написал</div>
+    <p class="muted">Откройте своего бота в Telegram, отправьте <code>/start</code>
+      и задайте вопрос — диалог появится здесь.</p>
+    <a class="btn ghost small" href="/bots">Посмотреть ботов</a>
+  </div>
   {% endif %}
 </div>
 {% endblock %}

@@ -61,7 +61,7 @@
     {% if b.role == 'sales' %}
     <div class="field"><label>Приветствие на /start (пусто — общее из Настроек)</label>
       <textarea name="greeting">{{ b.greeting or '' }}</textarea></div>
-    <label class="row">
+    <label class="check">
       <input type="checkbox" name="script_enabled" {{ 'checked' if b.script_enabled }}>
       <span>вести по сценарию продаж</span>
     </label>
@@ -77,7 +77,7 @@
     </p>
     {% endif %}
 
-    <label class="row">
+    <label class="check">
       <input type="checkbox" name="enabled" {{ 'checked' if b.enabled }}>
       <span>включён</span>
     </label>

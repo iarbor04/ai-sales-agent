@@ -50,25 +50,33 @@
       </span>
     </div>
     {% if ai_ready %}
-    <label class="row">
+    <label class="check">
       <input type="checkbox" name="drop_key">
       <span>удалить сохранённый ключ</span>
     </label>
     {% endif %}
     <div class="field">
       <label>Модель для ответов</label>
-      {% if models %}
-      <select name="model">
+      <input type="search" id="msearch" placeholder="поиск: claude, gpt, gemini, llama…"
+             oninput="filterModels()" style="margin-bottom:8px"
+             {{ 'disabled' if not models }}>
+      <select name="model" id="mselect" size="8">
         {% for m in models %}
         <option value="{{ m.id }}" {{ 'selected' if values.model == m.id }}>{{ m.id }}</option>
+        {% else %}
+        <option value="{{ values.model }}" selected>{{ values.model }}</option>
         {% endfor %}
       </select>
-      {% else %}
-      <input type="text" name="model" value="{{ values.model }}">
-      <span class="muted small">Список недоступен — впишите идентификатор модели вручную.</span>
-      {% endif %}
+      <span class="note" id="mcount">
+        {% if models %}
+          Доступно моделей: {{ models | length }}. Выбрана: <b>{{ values.model }}</b>
+        {% else %}
+          Список появится после сохранения ключа. Пока используется:
+          <b>{{ values.model }}</b>
+        {% endif %}
+      </span>
     </div>
-    <label class="row">
+    <label class="check">
       <input type="checkbox" name="ai_enabled_global"
         {{ 'checked' if values.ai_enabled_global == '1' }}>
       <span>ИИ отвечает клиентам</span>
@@ -93,44 +101,78 @@
   </div>
 
   <div class="card">
-    <h2>Google Таблицы</h2>
-    <div class="field">
-      <label>База знаний — ссылка на опубликованную таблицу</label>
-      <input type="text" name="sheets_kb_url" value="{{ values.sheets_kb_url }}"
-        placeholder="https://docs.google.com/spreadsheets/d/...">
-      <span class="muted small">
-        В таблице: Файл → Поделиться → Опубликовать в интернете. Каждая строка
-        станет фактом для агента: прайс, условия, частые вопросы.
-        Опубликованную таблицу видит любой по ссылке — не кладите туда личные данные.
-      </span>
-    </div>
-    <div class="row">
-      <div class="field"><label>CRM — идентификатор таблицы для лидов</label>
+    <h2>Выгрузка лидов в Google Таблицу <span class="hint">по желанию</span></h2>
+    <p class="lead-text">
+      Лиды и так видны в разделе «Лиды». Это на случай, если отделу удобнее
+      работать в таблице: строки обновляются на месте, дублей не будет.
+      Базу знаний из таблицы подключают в разделе
+      <a href="/knowledge">База знаний</a>.
+    </p>
+    <div class="row formgap">
+      <div class="field"><label>Идентификатор таблицы</label>
         <input type="text" name="sheets_crm_id" value="{{ values.sheets_crm_id }}"
-          placeholder="1AbC...  (часть ссылки между /d/ и /edit)"></div>
+          placeholder="1AbC…  — часть ссылки между /d/ и /edit"></div>
       <div class="field"><label>Лист</label>
         <input type="text" name="sheets_crm_tab" value="{{ values.sheets_crm_tab }}"></div>
     </div>
-    <p class="muted small">
-      Для записи лидов нужен сервисный аккаунт Google: путь к его JSON-ключу
-      в переменной <code>GOOGLE_SA_FILE</code>, а саму таблицу расшарьте на почту
-      этого аккаунта с правом редактирования.
+    <div class="callout">
+      Для записи нужен сервисный аккаунт Google: путь к его JSON-ключу в
+      переменной <code>GOOGLE_SA_FILE</code>, а таблицу расшарьте на почту этого
+      аккаунта с правом редактирования.
       {% if not sa_file %}<b>Сейчас ключ не задан — запись выключена.</b>{% endif %}
-    </p>
-    <div class="row">
-      <button class="btn ghost" type="button" onclick="checkSheets()">Проверить</button>
+    </div>
+    <div class="row" style="margin-top:12px">
+      <button class="btn ghost small" type="button" onclick="checkSheets()">Проверить связь</button>
     </div>
     <pre id="sheetsout" class="out" style="display:none"></pre>
   </div>
 
-  <button class="btn" type="submit">Сохранить</button>
+  <button class="btn" type="submit">Сохранить настройки</button>
 </form>
 
-<form method="post" action="/settings/sheets/sync" style="margin-top:10px">
+<form method="post" action="/settings/sheets/sync" style="margin-top:12px">
   <button class="btn ghost" type="submit">Синхронизировать таблицы сейчас</button>
 </form>
 
 <script>
+let allModels = [];
+
+async function loadModels() {
+  const select = document.getElementById('mselect');
+  if (select.options.length > 1) {
+    allModels = Array.from(select.options).map(o => o.value);
+    return;
+  }
+  const resp = await fetch('/api/models');
+  const rows = await resp.json();
+  if (!rows.length) return;
+  allModels = rows.map(r => r.id);
+  render(allModels);
+  document.getElementById('msearch').disabled = false;
+  document.getElementById('mcount').innerHTML =
+    'Доступно моделей: <b>' + allModels.length + '</b>';
+}
+
+function render(list) {
+  const select = document.getElementById('mselect');
+  const chosen = select.value;
+  select.innerHTML = '';
+  list.forEach(id => {
+    const opt = document.createElement('option');
+    opt.value = id; opt.textContent = id;
+    if (id === chosen) opt.selected = true;
+    select.appendChild(opt);
+  });
+}
+
+function filterModels() {
+  const q = document.getElementById('msearch').value.toLowerCase().trim();
+  const list = q ? allModels.filter(id => id.toLowerCase().includes(q)) : allModels;
+  render(list);
+  document.getElementById('mcount').innerHTML =
+    'Показано: <b>' + list.length + '</b> из ' + allModels.length;
+}
+
 async function checkSheets() {
   const out = document.getElementById('sheetsout');
   out.style.display = 'block';
@@ -139,5 +181,7 @@ async function checkSheets() {
   const data = await resp.json();
   out.textContent = 'База знаний: ' + data.kb + '\nCRM: ' + data.crm;
 }
+
+loadModels();
 </script>
 {% endblock %}

@@ -3,7 +3,7 @@
 {% block body %}
 <div class="topbar">
   <h1>Сценарий продаж</h1>
-  <div class="botswitch">
+  <div class="tabs">
     <a href="/script" class="{{ 'on' if not bot_id }}">общий</a>
     {% for b in sales_bots %}
     <a href="/script?bot={{ b.id }}" class="{{ 'on' if bot_id == b.id }}">{{ b.title }}</a>
@@ -12,13 +12,20 @@
 </div>
 
 <div class="card">
-  <p class="muted small" style="margin:0">
+  <p class="lead-text" style="margin:0">
     Шаги — это не анкета. Агент получает цель текущего шага и сам решает, как её
     достичь и когда шаг закрыт: клиент может ответить на два вопроса сразу или
-    задать свой — сценарий это выдержит. Порядок задаёт колонка «№».
+    задать свой встречный — сценарий это выдержит. Порядок задаёт колонка «№».
     Чтобы бот пошёл по сценарию, включите галочку у него в разделе
     <a href="/bots">Боты</a>.
   </p>
+  {% if steps | selectattr('enabled') | list | length > 5 %}
+  <div class="callout" style="border-left-color: var(--warn)">
+    <b>Шагов больше пяти.</b> По исследованиям чат-ботов продаж каждый вопрос
+    сверх пятого роняет доходимость разговора примерно на 10%. Лучше собрать
+    главное и передать менеджеру, чем устроить клиенту допрос.
+  </div>
+  {% endif %}
 </div>
 
 {% if bot_id and not steps %}

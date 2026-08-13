@@ -7,29 +7,84 @@
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
+{% macro icon(name) %}
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+  {%- if name == 'home' -%}<path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/>
+  {%- elif name == 'chat' -%}<path d="M21 12a8 8 0 0 1-11.6 7.1L3 21l1.9-6.4A8 8 0 1 1 21 12z"/>
+  {%- elif name == 'bell' -%}<path d="M18 8a6 6 0 1 0-12 0c0 7-3 8-3 8h18s-3-1-3-8"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/>
+  {%- elif name == 'users' -%}<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.9"/>
+  {%- elif name == 'book' -%}<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+  {%- elif name == 'send' -%}<path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4 20-7z"/>
+  {%- elif name == 'bot' -%}<rect x="4" y="8" width="16" height="12" rx="3"/><path d="M12 8V4"/><circle cx="9" cy="14" r="1"/><circle cx="15" cy="14" r="1"/>
+  {%- elif name == 'route' -%}<circle cx="6" cy="19" r="2.5"/><circle cx="18" cy="5" r="2.5"/><path d="M8.5 19H15a3.5 3.5 0 0 0 0-7H9a3.5 3.5 0 0 1 0-7h6.5"/>
+  {%- elif name == 'gear' -%}<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-2.9 1.2V21a2 2 0 1 1-4 0v-.1A1.7 1.7 0 0 0 7 19.4a1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0-1.2-2.9H1a2 2 0 1 1 0-4h.1A1.7 1.7 0 0 0 2.6 7a1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H7a1.7 1.7 0 0 0 1-1.5V1a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V7a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>
+  {%- elif name == 'rocket' -%}<path d="M5 13c-1.5 1.5-2 5-2 5s3.5-.5 5-2"/><path d="M14.5 4.5C17 2 21 3 21 3s1 4-1.5 6.5L13 16l-5-5 6.5-6.5z"/><circle cx="16" cy="8" r="1.2"/>
+  {%- elif name == 'exit' -%}<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/>
+  {%- endif -%}
+</svg>
+{% endmacro %}
+
 <div class="layout">
   <aside class="side">
-    <div class="brand">ИИ-продажник</div>
+    <div class="brand">
+      <span class="dot">ИИ</span>
+      <span>Продажник</span>
+    </div>
+
     <nav>
-      <a href="/" class="{{ 'active' if path == '/' }}">Обзор</a>
+      {% if setup and not setup.ready %}
+      <a href="/onboarding" class="{{ 'active' if path.startswith('/onboarding') }}">
+        {{ icon('rocket') }}<span class="label">Настройка</span>
+        <span class="badge soft">{{ setup.done }}/{{ setup.total }}</span>
+      </a>
+      <div class="sep"></div>
+      {% endif %}
+
+      <a href="/" class="{{ 'active' if path == '/' }}">
+        {{ icon('home') }}<span class="label">Обзор</span>
+      </a>
       <a href="/dialogs" class="{{ 'active' if path.startswith('/dialogs') }}">
-        Диалоги {% if unread %}<span class="badge">{{ unread }}</span>{% endif %}
+        {{ icon('chat') }}<span class="label">Диалоги</span>
+        {% if unread %}<span class="badge">{{ unread }}</span>{% endif %}
       </a>
       <a href="/requests" class="{{ 'active' if path.startswith('/requests') }}">
-        Обращения {% if open_requests %}<span class="badge">{{ open_requests }}</span>{% endif %}
+        {{ icon('bell') }}<span class="label">Обращения</span>
+        {% if open_requests %}<span class="badge">{{ open_requests }}</span>{% endif %}
       </a>
-      <a href="/leads" class="{{ 'active' if path.startswith('/leads') }}">Лиды</a>
-      <a href="/knowledge" class="{{ 'active' if path.startswith('/knowledge') }}">База знаний</a>
-      <a href="/broadcast" class="{{ 'active' if path.startswith('/broadcast') }}">Рассылки</a>
-      <a href="/bots" class="{{ 'active' if path.startswith('/bots') }}">Боты</a>
-      <a href="/script" class="{{ 'active' if path.startswith('/script') }}">Сценарий</a>
-      <a href="/settings" class="{{ 'active' if path.startswith('/settings') }}">Настройки</a>
-      <a href="/logout" class="muted">Выйти</a>
+      <a href="/leads" class="{{ 'active' if path.startswith('/leads') }}">
+        {{ icon('users') }}<span class="label">Лиды</span>
+      </a>
+
+      <div class="sep"></div>
+
+      <a href="/knowledge" class="{{ 'active' if path.startswith('/knowledge') }}">
+        {{ icon('book') }}<span class="label">База знаний</span>
+      </a>
+      <a href="/script" class="{{ 'active' if path.startswith('/script') }}">
+        {{ icon('route') }}<span class="label">Сценарий</span>
+      </a>
+      <a href="/broadcast" class="{{ 'active' if path.startswith('/broadcast') }}">
+        {{ icon('send') }}<span class="label">Рассылки</span>
+      </a>
+
+      <div class="sep"></div>
+
+      <a href="/bots" class="{{ 'active' if path.startswith('/bots') }}">
+        {{ icon('bot') }}<span class="label">Боты</span>
+      </a>
+      <a href="/settings" class="{{ 'active' if path.startswith('/settings') }}">
+        {{ icon('gear') }}<span class="label">Настройки</span>
+      </a>
+      <a href="/logout">{{ icon('exit') }}<span class="label">Выйти</span></a>
     </nav>
+
     <div class="aistate {{ 'on' if ai_on else 'off' }}">
-      ИИ {{ 'включён' if ai_on else 'выключен' }}
+      <span class="led"></span>
+      <span>{{ 'ИИ отвечает клиентам' if ai_on else 'ИИ выключен' }}</span>
     </div>
   </aside>
+
   <main class="main">
     {% block body %}{% endblock %}
   </main>
