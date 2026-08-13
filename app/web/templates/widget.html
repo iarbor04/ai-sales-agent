@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}Чат для сайта · ИИ-продажник{% endblock %}
+{% block body %}
+<div class="topbar">
+  <div style="flex:1">
+    <h1>Чат для сайта</h1>
+    <p class="sub">Тот же агент отвечает посетителям прямо на страницах сайта.</p>
+  </div>
+  {% if on %}<span class="pill ok">включён</span>
+  {% else %}<span class="pill off">выключен</span>{% endif %}
+</div>
+
+<div class="card accent">
+  <h2>Одна строка на сайт</h2>
+  <p class="lead-text">
+    Вставьте её перед закрывающим тегом <code>&lt;/body&gt;</code> на всех
+    страницах. Больше ничего делать не нужно: ни ключей, ни настроек на стороне
+    сайта. Виджет ничего не тянет со стороны и не ломает вёрстку — стили
+    изолированы.
+  </p>
+  <pre class="dump" id="snip">{{ snippet }}</pre>
+  <button class="btn ghost small" onclick="copySnip()">Скопировать</button>
+  <span id="copied" class="dim small" style="display:none">скопировано</span>
+</div>
+
+<form method="post" action="/widget/save">
+  <div class="card">
+    <h2>Оформление</h2>
+    <label class="check">
+      <input type="checkbox" name="on" {{ 'checked' if on }}>
+      <span>чат работает на сайте</span>
+    </label>
+    <div class="row formgap">
+      <div class="field"><label>Заголовок окна</label>
+        <input type="text" name="widget_title" value="{{ values.widget_title }}"
+               placeholder="Чат с консультантом"></div>
+      <div class="field" style="max-width:180px"><label>Цвет</label>
+        <input type="text" name="widget_color" value="{{ values.widget_color }}"
+               placeholder="#0a7c47"></div>
+    </div>
+    <div class="field"><label>Первое сообщение</label>
+      <textarea name="widget_greeting" style="min-height:70px"
+        placeholder="Здравствуйте! Чем помочь?">{{ values.widget_greeting }}</textarea></div>
+    <button class="btn" type="submit">Сохранить</button>
+  </div>
+</form>
+
+<div class="card">
+  <h2>Как это работает</h2>
+  <p class="lead-text" style="margin:0">
+    Посетитель пишет в окно — сообщение попадает тому же агенту, что отвечает
+    в мессенджерах: та же база знаний, тот же сценарий, та же передача менеджеру.
+    Диалог виден в разделе <a href="/dialogs">Диалоги</a> с пометкой
+    «Чат на сайте», отвечать можно оттуда же.
+  </p>
+  <div class="callout">
+    Посетитель узнаётся по подписанному токену в браузере, поэтому переписка
+    не теряется при перезагрузке страницы. Читать чужой диалог по подобранному
+    токену нельзя — подпись не сойдётся.
+  </div>
+</div>
+
+<script>
+function copySnip() {
+  navigator.clipboard.writeText(document.getElementById('snip').textContent.trim());
+  var tag = document.getElementById('copied');
+  tag.style.display = 'inline';
+  setTimeout(function () { tag.style.display = 'none'; }, 1800);
+}
+</script>
+{% endblock %}

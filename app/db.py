@@ -360,6 +360,11 @@ DEFAULT_SETTINGS = {
     "rivals_every_hours": "12",
     "rivals_notify": "1",
     # онлайн-запись
+    # чат для сайта
+    "widget_enabled": "1",
+    "widget_title": "Чат с консультантом",
+    "widget_color": "#0a7c47",
+    "widget_greeting": "Здравствуйте! Чем помочь?",
     "booking_enabled": "0",
     "booking_remind_hours": "3",
 }

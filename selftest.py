@@ -191,6 +191,19 @@ def main() -> int:
     db.reorder_script(list(reversed(ids)))
     check("порядок шагов меняется", [s["id"] for s in db.script()] == list(reversed(ids)))
 
+    section("Чат для сайта")
+    from app.channels import web as webchat
+    token = webchat.new_visitor()
+    check("токен посетителя подписан", webchat.visitor_id(token) is not None)
+    check("подделанный токен отвергается", webchat.visitor_id("подделка") is None)
+    guest = webchat.contact_for(token)
+    same = webchat.contact_for(token)
+    check("посетитель не двоится", guest and same and guest["id"] == same["id"])
+    check("чужой токен не даёт контакта", webchat.contact_for("nope") is None)
+    db.add_message(guest["id"], "out", "ai", "Здравствуйте!", is_read=True)
+    check("виджет забирает ответы", len(webchat.history_after(guest["id"], 0)) >= 1)
+    check("сниппет содержит адрес", "widget.js" in webchat.snippet())
+
     section("Онлайн-запись")
     from app import booking as bk
     db.run("INSERT INTO services (title, duration_min, price) VALUES ('Стрижка', 40, '1500')")

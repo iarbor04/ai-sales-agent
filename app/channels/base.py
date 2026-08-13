@@ -65,6 +65,10 @@ async def send(contact_id: int, text: str, media_path: str | None = None,
             contact["external_id"], text, media_path, button,
             bot_id=contact["bot_id"], kind=kind,
         )
+    elif channel == "web":
+        from . import web as webchat
+        # для сайта отправка = запись в базу, виджет заберёт её опросом
+        ok, status = await webchat.send(contact_id, text, media_path, button)
     elif channel == "max":
         from . import maxru
         row = db.bot(contact["bot_id"]) if contact["bot_id"] else None

@@ -21,6 +21,9 @@ def active() -> list[str]:
         channels.append("max")
     if config.whatsapp_enabled():
         channels.append("wa")
+    from . import web as webchat
+    if webchat.enabled():
+        channels.append("web")
     return channels
 
 

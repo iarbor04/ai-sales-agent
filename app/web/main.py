@@ -31,6 +31,7 @@ from .. import (
 )
 from .. import channels
 from ..channels import base, telegram, whatsapp
+from ..channels import web as webchat
 
 log = logging.getLogger("web")
 
@@ -126,7 +127,8 @@ def page(request: Request, name: str, **ctx) -> HTMLResponse:
 @app.middleware("http")
 async def guard(request: Request, call_next):
     """Всё, кроме входа, вебхуков и здоровья, закрыто сессией."""
-    open_paths = ("/login", "/static", "/hook", "/health")
+    open_paths = ("/login", "/static", "/hook", "/health",
+                  "/widget.js", "/api/widget")
     if request.url.path.startswith(open_paths) or authed(request):
         return await call_next(request)
     return RedirectResponse("/login", status_code=303)
@@ -1005,3 +1007,88 @@ async def booking_staff_delete(staff_id: int):
 async def booking_cancel(booking_id: int):
     db.run("UPDATE bookings SET status = 'cancelled' WHERE id = ?", (booking_id,))
     return RedirectResponse("/booking", status_code=303)
+
+
+# ── чат для сайта ──────────────────────────────────────────────────────
+# Виджет живёт на чужом домене, поэтому этим адресам нужен CORS и открытый
+# доступ без сессии. Данные защищены подписанным токеном посетителя.
+
+def _cors(payload: dict) -> JSONResponse:
+    return JSONResponse(payload, headers={
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Headers": "Content-Type",
+        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    })
+
+
+@app.get("/widget.js")
+async def widget_js():
+    """Скрипт виджета. Отдаём с открытым CORS — он грузится с чужих сайтов."""
+    return FileResponse(
+        BASE_DIR / "static" / "widget.js",
+        media_type="application/javascript",
+        headers={"Access-Control-Allow-Origin": "*", "Cache-Control": "public, max-age=300"},
+    )
+
+
+@app.options("/api/widget/{rest:path}")
+async def widget_preflight(rest: str):
+    return _cors({"ok": True})
+
+
+@app.post("/api/widget/start")
+async def widget_start():
+    """Новый посетитель: выдаём подписанный токен и оформление окна."""
+    if not webchat.enabled():
+        return _cors({"ok": False})
+    return _cors({
+        "ok": True,
+        "token": webchat.new_visitor(),
+        "title": db.setting("widget_title", "Чат"),
+        "color": db.setting("widget_color", "#0a7c47"),
+        "greeting": db.setting("widget_greeting", ""),
+    })
+
+
+@app.post("/api/widget/send")
+async def widget_send(request: Request):
+    if not webchat.enabled():
+        return _cors({"ok": False})
+    data = await request.json()
+    contact = webchat.contact_for(str(data.get("token") or ""))
+    if contact is None:
+        return _cors({"ok": False, "error": "bad token"})
+
+    text = str(data.get("text") or "").strip()[:4000]
+    if text:
+        await sales.handle_incoming(contact["id"], text)
+    return _cors({"ok": True})
+
+
+@app.get("/api/widget/poll")
+async def widget_poll(token: str = "", after: int = 0):
+    if not webchat.enabled():
+        return _cors({"ok": False})
+    contact = webchat.contact_for(token)
+    if contact is None:
+        return _cors({"ok": False, "error": "bad token"})
+    return _cors({"ok": True, "messages": webchat.history_after(contact["id"], after)})
+
+
+@app.get("/widget", response_class=HTMLResponse)
+async def widget_settings(request: Request):
+    return page(request, "widget.html",
+                snippet=webchat.snippet(),
+                on=webchat.enabled(),
+                values={k: db.setting(k, "") for k in
+                        ("widget_title", "widget_color", "widget_greeting")})
+
+
+@app.post("/widget/save")
+async def widget_save(request: Request):
+    form = await request.form()
+    db.set_setting("widget_enabled", "1" if form.get("on") else "0")
+    for key in ("widget_title", "widget_color", "widget_greeting"):
+        if key in form:
+            db.set_setting(key, str(form.get(key) or ""))
+    return RedirectResponse("/widget", status_code=303)
