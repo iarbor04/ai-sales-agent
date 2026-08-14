@@ -186,15 +186,6 @@ SCHEMA = [
         sent_at INTEGER NOT NULL,
         UNIQUE (broadcast_id, contact_id)
     )""",
-    # Очередь того, что не удалось записать сразу (например, CRM была недоступна).
-    """CREATE TABLE IF NOT EXISTS retry_queue (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        kind TEXT NOT NULL,
-        payload TEXT,
-        attempts INTEGER NOT NULL DEFAULT 0,
-        last_error TEXT,
-        created_at INTEGER NOT NULL
-    )""",
     # Онлайн-запись: услуги, сотрудники, часы работы и журнал записей.
     """CREATE TABLE IF NOT EXISTS services (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -364,6 +355,8 @@ DEFAULT_SETTINGS = {
     # онлайн-запись
     # чат для сайта
     "mail_subject": "Ваш вопрос",
+    # как часто перечитывать страницы сайта, в часах
+    "kb_refresh_hours": "24",
     "widget_enabled": "1",
     "widget_title": "Чат с консультантом",
     "widget_color": "#0a7c47",

@@ -123,6 +123,29 @@ def main() -> int:
     check("находит по смыслу", bool(retrieval.search("сколько стоит доставка")))
     check("не выдумывает лишнего", not retrieval.search("ремонт холодильников"))
 
+    section("Обновление базы знаний")
+    # источник, загруженный один раз и забытый, начинает врать: клиент
+    # поменяет цену на сайте, а агент будет отвечать по старой копии
+    check("есть перечитывание источников", hasattr(knowledge, "refresh"))
+    check("перечитывание идёт по расписанию", hasattr(knowledge, "refresh_due"))
+    db.set_setting("kb_refresh_hours", "24")
+    db.set_setting("kb_last_refresh", str(db.now()))
+    check("только что проверенное не перечитывается", not knowledge.refresh_due())
+    db.set_setting("kb_last_refresh", str(db.now() - 25 * 3600))
+    check("просроченное перечитывается", knowledge.refresh_due())
+    db.set_setting("kb_refresh_hours", "0")
+    check("ноль часов выключает перечитывание", not knowledge.refresh_due())
+
+    section("Нет мёртвого кода")
+    tables_now = {r["name"] for r in db.q(
+        "SELECT name FROM sqlite_master WHERE type='table'")}
+    check("очереди-пустышки retry_queue больше нет", "retry_queue" not in tables_now)
+    sched = (ROOT / "app/scheduler.py").read_text()
+    check("планировщик её не зовёт", "retry_queue" not in sched)
+    vk_src = (ROOT / "app/channels/vk.py").read_text()
+    check("ВК грузит не только картинки",
+          "docs.getMessagesUploadServer" in vk_src and "audio_message" in vk_src)
+
     section("Вложения")
     kinds = {"a.jpg": "photo", "v.ogg": "voice", "s.mp3": "audio",
              "c.mp4": "video", "d.pdf": "document"}

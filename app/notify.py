@@ -101,3 +101,12 @@ async def booked(contact_id: int, slot: dict) -> None:
         f"Услуга: {slot['service']}\n"
         f"Когда: {slot['weekday']} {slot['label']}{who}"
     )
+
+
+async def kb_pages_gone(count: int) -> None:
+    """Страницы базы знаний перестали открываться — это дыра в ответах."""
+    await _push(
+        f"⚠️ <b>База знаний</b>\nСтраниц перестало открываться: {count}. "
+        f"Агент больше не отвечает по ним и будет чаще звать менеджера.\n"
+        f'<a href="{config.PUBLIC_URL}/knowledge">Проверить источники</a>'
+    )

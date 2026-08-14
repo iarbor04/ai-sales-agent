@@ -68,10 +68,20 @@
 {% if pages %}
 <div class="card">
   <h2>Страницы сайта <span class="hint">снимите галочку с лишних и сохраните</span></h2>
+  <div class="row between" style="margin-bottom:12px">
+    <span class="dim small">
+      {% if last_refresh %}Последняя проверка: {{ last_refresh | dt }}.{% endif %}
+      Агент перечитывает сайт сам — цены там меняются без нас.
+    </span>
+    <form method="post" action="/knowledge/refresh">
+      <button class="btn ghost small">Перечитать сейчас</button>
+    </form>
+  </div>
   <form method="post" action="/knowledge/select">
     <table>
       <tr><th style="width:44px"></th><th>Страница</th>
-          <th style="width:110px">Символов</th><th style="width:130px">Статус</th></tr>
+          <th style="width:100px">Символов</th><th style="width:130px">Проверена</th>
+          <th style="width:130px">Статус</th></tr>
       {% for p in pages %}
       <tr>
         <td><input type="checkbox" name="page_{{ p.id }}" {{ 'checked' if p.included }}></td>
@@ -80,6 +90,7 @@
           <div class="small dim">{{ p.url }}</div>
         </td>
         <td>{{ p.chars or '—' }}</td>
+        <td class="small dim">{{ p.fetched_at | dt or '—' }}</td>
         <td>
           {% if p.status == 'loaded' %}<span class="pill ok">загружена</span>
           {% elif p.status == 'error' %}<span class="pill bad">недоступна</span>
@@ -92,6 +103,17 @@
       <span class="dim small">Выкидывайте блог и новости — они только мешают агенту.</span>
       <button class="btn" type="submit">Сохранить и загрузить</button>
     </div>
+  </form>
+
+  <form method="post" action="/knowledge/schedule" class="row"
+        style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border-soft)">
+    <div class="field" style="max-width:220px">
+      <label>Перечитывать сайт каждые, часов</label>
+      <input type="number" name="hours" value="{{ refresh_hours }}" min="0" max="720">
+      <span class="note">Ноль — не перечитывать. Страница, которая перестала
+        открываться, выпадает из поиска, и владелец получает уведомление.</span>
+    </div>
+    <button class="btn ghost small" type="submit">Сохранить расписание</button>
   </form>
 </div>
 {% endif %}

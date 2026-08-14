@@ -272,3 +272,73 @@ def stats() -> dict:
     loaded = db.q1("SELECT COUNT(*) AS c FROM kb_pages WHERE status = 'loaded'")["c"]
     chunks = db.q1("SELECT COUNT(*) AS c FROM kb_chunks")["c"]
     return {"total": total, "included": included, "loaded": loaded, "chunks": chunks}
+
+
+def refresh(force: bool = False) -> dict:
+    """Перечитать страницы сайта и обновить те, что изменились.
+
+    Загрузить один раз и забыть — нельзя: клиент поменяет цену на сайте,
+    а агент будет уверенно называть старую. Уверенно неверный ответ хуже,
+    чем «уточню у менеджера», поэтому источники нужно перечитывать.
+
+    Страницу, которая перестала открываться, помечаем ошибкой и выкидываем
+    из поиска: дыра в базе знаний безопаснее устаревшего ответа.
+    """
+    pages = db.q(
+        "SELECT * FROM kb_pages WHERE included = 1"
+        " AND url NOT LIKE 'manual://%' AND url NOT LIKE 'sheet://%'"
+    )
+    changed = gone = same = 0
+
+    for page in pages:
+        html = _get(page["url"])
+        if html is None:
+            db.run("UPDATE kb_pages SET status = 'error', fetched_at = ? WHERE id = ?",
+                   (db.now(), page["id"]))
+            db.run("DELETE FROM kb_chunks WHERE page_id = ?", (page["id"],))
+            gone += 1
+            continue
+
+        parser = _TextParser()
+        try:
+            parser.feed(html)
+        except Exception:  # noqa: BLE001 — кривая разметка не должна ронять обход
+            pass
+        text = parser.text()
+
+        if not force and text == (page["text"] or ""):
+            db.run("UPDATE kb_pages SET fetched_at = ?, status = 'loaded' WHERE id = ?",
+                   (db.now(), page["id"]))
+            same += 1
+            continue
+
+        db.run(
+            "UPDATE kb_pages SET text = ?, chars = ?, status = 'loaded', fetched_at = ?"
+            " WHERE id = ?",
+            (text, len(text), db.now(), page["id"]),
+        )
+        _rechunk(page["id"], text)
+        changed += 1
+        time.sleep(0.2)
+
+    db.set_setting("kb_last_refresh", str(db.now()))
+    if changed or gone:
+        log.info("база знаний обновлена: изменилось %s, отвалилось %s", changed, gone)
+    return {"checked": len(pages), "changed": changed, "gone": gone, "same": same}
+
+
+def refresh_due() -> bool:
+    """Пора ли перечитывать сайт — по расписанию из настроек."""
+    if not db.q1("SELECT 1 FROM kb_pages WHERE included = 1"
+                 " AND url NOT LIKE 'manual://%' AND url NOT LIKE 'sheet://%'"):
+        return False
+    try:
+        hours = int(db.setting("kb_refresh_hours", "24") or 24)
+    except ValueError:
+        hours = 24
+    if hours <= 0:
+        return False
+    last = db.setting("kb_last_refresh", "")
+    if not last.isdigit():
+        return True
+    return db.now() - int(last) >= hours * 3600

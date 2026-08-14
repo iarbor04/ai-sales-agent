@@ -351,9 +351,29 @@ async def kb_page(request: Request):
         " ORDER BY included DESC, chars DESC, url LIMIT 500"
     )
     sheet = db.q1("SELECT * FROM kb_pages WHERE url = 'sheet://knowledge'")
+    last = db.setting("kb_last_refresh", "")
     return page(request, "knowledge.html", pages=pages, stats=knowledge.stats(),
                 site=db.setting("business_site", ""), extra=db.setting("kb_extra", ""),
-                sheet_url=db.setting("sheets_kb_url", ""), sheet=sheet)
+                sheet_url=db.setting("sheets_kb_url", ""), sheet=sheet,
+                refresh_hours=db.setting("kb_refresh_hours", "24"),
+                last_refresh=int(last) if last.isdigit() else 0)
+
+
+@app.post("/knowledge/refresh")
+async def kb_refresh(request: Request):
+    """Перечитать страницы сайта прямо сейчас."""
+    result = await asyncio.to_thread(knowledge.refresh)
+    retrieval.invalidate()
+    return RedirectResponse(
+        f"/knowledge?changed={result['changed']}&gone={result['gone']}",
+        status_code=303,
+    )
+
+
+@app.post("/knowledge/schedule")
+async def kb_schedule(hours: str = Form("24")):
+    db.set_setting("kb_refresh_hours", hours.strip() or "24")
+    return RedirectResponse("/knowledge", status_code=303)
 
 
 @app.post("/knowledge/sheet")

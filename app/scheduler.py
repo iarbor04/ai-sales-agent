@@ -8,7 +8,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from . import booking, broadcast, config, db, rivals, sheets
+from . import booking, broadcast, config, db, knowledge, retrieval, rivals, sheets
 
 log = logging.getLogger("scheduler")
 
@@ -20,8 +20,20 @@ async def _tick() -> None:
     await broadcast.due()
     await _sync_sheets()
     await _watch_rivals()
+    await _refresh_knowledge()
     await _remind_bookings()
-    await _retry_pending()
+
+
+async def _refresh_knowledge() -> None:
+    """Перечитать сайт клиента: цены и условия там меняются без нас."""
+    if not knowledge.refresh_due():
+        return
+    result = await asyncio.to_thread(knowledge.refresh)
+    if result["changed"] or result["gone"]:
+        retrieval.invalidate()
+    if result["gone"]:
+        from . import notify
+        await notify.kb_pages_gone(result["gone"])
 
 
 async def _remind_bookings() -> None:
@@ -80,20 +92,6 @@ async def _sync_sheets() -> None:
     if db.setting("sheets_kb_url", "").strip() and db.now() - _last_sheets_sync > period:
         _last_sheets_sync = db.now()
         await asyncio.to_thread(sheets.sync_knowledge)
-
-
-async def _retry_pending() -> None:
-    """Повторить то, что не удалось записать с первого раза.
-
-    По ТЗ: если система учёта недоступна — сохранить сообщение и повторить
-    запись позже. Очередь общая, kind говорит, что именно повторять.
-    """
-    rows = db.q("SELECT * FROM retry_queue WHERE attempts < 5 ORDER BY id LIMIT 20")
-    for row in rows:
-        db.run("UPDATE retry_queue SET attempts = attempts + 1 WHERE id = ?", (row["id"],))
-        # Встроенных внешних систем учёта пока нет: лиды живут в своей базе.
-        # Крючок оставлен, чтобы подключение CRM не потребовало правок схемы.
-        db.run("DELETE FROM retry_queue WHERE id = ?", (row["id"],))
 
 
 async def _loop() -> None:

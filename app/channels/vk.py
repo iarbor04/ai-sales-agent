@@ -71,7 +71,7 @@ async def send(peer_id: str, text: str, media_path: str | None = None,
     }
 
     if media_path:
-        attachment = await _upload_photo(token, peer_id, media_path, kind)
+        attachment = await _upload(token, peer_id, media_path, kind)
         if attachment:
             params["attachment"] = attachment
 
@@ -90,38 +90,62 @@ async def send(peer_id: str, text: str, media_path: str | None = None,
         return False, "error"
 
 
-async def _upload_photo(token: str, peer_id: str, media_path: str,
-                        kind: str | None) -> str | None:
-    """Картинку ВК принимает в три шага: адрес, загрузка, сохранение."""
-    from .base import media_file, media_kind
-    if (kind or media_kind(media_path)) != "photo":
-        # документы и голосовые грузятся другим методом; пока не поддерживаем,
-        # чтобы не молчать — сообщение уйдёт текстом без вложения
-        return None
+async def _upload(token: str, peer_id: str, media_path: str,
+                  kind: str | None) -> str | None:
+    """Загрузить вложение и получить строку attachment.
 
+    У ВК два разных пути: картинки идут через photos, всё остальное — через
+    docs, причём голосовое там отдельный подтип audio_message. Оба пути
+    трёхшаговые: спросить адрес, положить файл, сохранить.
+    """
+    from .base import media_file, media_kind
+    kind = kind or media_kind(media_path)
     path = media_file(media_path)
     if not path.exists():
         return None
 
     try:
-        server = await _call(token, "photos.getMessagesUploadServer", peer_id=peer_id)
+        if kind == "photo":
+            server = await _call(token, "photos.getMessagesUploadServer",
+                                 peer_id=peer_id)
+            async with httpx.AsyncClient(timeout=60) as client:
+                with path.open("rb") as fh:
+                    up = await client.post(server["upload_url"],
+                                           files={"photo": (path.name, fh)})
+                up.raise_for_status()
+                blob = up.json()
+
+            saved = await _call(
+                token, "photos.saveMessagesPhoto",
+                photo=blob.get("photo"), server=blob.get("server"),
+                hash=blob.get("hash"),
+            )
+            item = saved[0] if isinstance(saved, list) and saved else None
+            return f"photo{item['owner_id']}_{item['id']}" if item else None
+
+        # голосовое у ВК — отдельный тип, иначе приедет обычным файлом
+        doc_type = "audio_message" if kind == "voice" else "doc"
+        server = await _call(token, "docs.getMessagesUploadServer",
+                             peer_id=peer_id, type=doc_type)
         async with httpx.AsyncClient(timeout=60) as client:
             with path.open("rb") as fh:
                 up = await client.post(server["upload_url"],
-                                       files={"photo": (path.name, fh)})
+                                       files={"file": (path.name, fh)})
             up.raise_for_status()
             blob = up.json()
 
-        saved = await _call(
-            token, "photos.saveMessagesPhoto",
-            photo=blob.get("photo"), server=blob.get("server"), hash=blob.get("hash"),
-        )
-        item = saved[0] if isinstance(saved, list) and saved else None
-        if not item:
+        saved = await _call(token, "docs.save", file=blob.get("file"),
+                            title=path.name)
+        # ответ приходит как {"type": "...", "<type>": {...}}
+        holder = saved.get(saved.get("type", "doc")) if isinstance(saved, dict) else None
+        if isinstance(saved, list) and saved:
+            holder = saved[0]
+        if not holder:
             return None
-        return f"photo{item['owner_id']}_{item['id']}"
+        prefix = "audio_message" if doc_type == "audio_message" else "doc"
+        return f"{prefix}{holder['owner_id']}_{holder['id']}"
     except Exception as exc:  # noqa: BLE001
-        log.warning("картинка в ВК не загрузилась: %s", exc)
+        log.warning("вложение в ВК не загрузилось: %s", exc)
         return None
 
 
