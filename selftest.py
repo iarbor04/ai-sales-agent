@@ -267,6 +267,13 @@ def main() -> int:
             external.append(name)
     check("логотипы не тянут ничего извне", not external, ", ".join(external))
 
+    # размер логотипа задан прямо на теге: устаревший css в браузере
+    # не должен разносить вёрстку
+    check("у логотипов размер прописан на теге",
+          'width="{{ px }}" height="{{ px }}"' in base_tpl)
+    # адрес стилей с версией — правка css видна сразу, без чистки кеша
+    check("стили подключаются с версией", "style.css?v=" in base_tpl)
+
     section("Чат для сайта")
     from app.channels import web as webchat
     token = webchat.new_visitor()

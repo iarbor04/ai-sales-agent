@@ -112,7 +112,16 @@ def authed(request: Request) -> bool:
     return bool(_session(request).get("auth"))
 
 
+def assets_version() -> str:
+    """Метка стилей для адреса. Правка css видна сразу, без чистки кеша."""
+    try:
+        return str(int((BASE_DIR / "static" / "style.css").stat().st_mtime))
+    except OSError:
+        return "1"
+
+
 def page(request: Request, name: str, **ctx) -> HTMLResponse:
+    ctx.setdefault("assets", assets_version())
     ctx.setdefault("unread", db.unread_count())
     ctx.setdefault("open_requests", db.open_requests_count())
     ctx.setdefault("statuses", db.LEAD_STATUSES)
@@ -148,7 +157,8 @@ async def health():
 
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
-    return templates.TemplateResponse(request, "login.html", {"error": ""})
+    return templates.TemplateResponse(
+        request, "login.html", {"error": "", "assets": assets_version()})
 
 
 @app.post("/login")
@@ -161,7 +171,9 @@ async def login(request: Request, login: str = Form(""), password: str = Form(""
         )
         return response
     return templates.TemplateResponse(
-        request, "login.html", {"error": "Неверный логин или пароль"}, status_code=401
+        request, "login.html",
+        {"error": "Неверный логин или пароль", "assets": assets_version()},
+        status_code=401,
     )
 
 

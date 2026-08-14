@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}ИИ-продажник{% endblock %}</title>
   <link rel="icon" type="image/png" href="/static/favicon.png">
-  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/style.css?v={{ assets }}">
 </head>
 <body>
 {# Значок канала. Настоящие логотипы лежат файлами в static/logos —
@@ -26,7 +26,9 @@
   <span class="glyph{{ ' plain' if brand[1] }}"
         style="--brand: {{ {'mail': '#7A8595', 'web': '#0a7c47'}.get(code, '#8b939e') }}">
     {%- if brand[1] -%}
-    <img src="/static/logos/{{ brand[1] }}" alt="{{ brand[0] }}">
+    {%- set px = 26 if 'big' in size else 20 -%}
+    <img src="/static/logos/{{ brand[1] }}" alt="{{ brand[0] }}"
+         width="{{ px }}" height="{{ px }}">
     {%- elif code == 'mail' -%}
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><rect x="2.5" y="4.5" width="19" height="15" rx="2.5"/><path d="m3 6.5 9 6.5 9-6.5"/></svg>
     {%- else -%}
