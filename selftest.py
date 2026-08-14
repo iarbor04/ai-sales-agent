@@ -254,10 +254,18 @@ def main() -> int:
     need_logos = ["telegram.svg", "whatsapp.svg", "vk.svg", "max.svg", "avito.svg"]
     absent = [n for n in need_logos if not (logos / n).exists()]
     check("настоящие логотипы на месте", not absent, ", ".join(absent))
-    check("логотипы лежат локально, не по внешним ссылкам",
-          "http" not in "".join(
-              (logos / n).read_text(errors="ignore")[:200] for n in need_logos
-              if (logos / n).exists() and n != "max.svg"))
+    # xmlns="http://www.w3.org/2000/svg" — это объявление пространства имён,
+    # а не загрузка извне. Ищем именно ссылки на чужие адреса.
+    import re as _re
+    external = []
+    for name in need_logos:
+        path = logos / name
+        if not path.exists():
+            continue
+        body = path.read_text(errors="ignore")
+        if _re.search(r'(?:href|src|url\()\s*=?\s*["\']?https?://', body):
+            external.append(name)
+    check("логотипы не тянут ничего извне", not external, ", ".join(external))
 
     section("Чат для сайта")
     from app.channels import web as webchat
