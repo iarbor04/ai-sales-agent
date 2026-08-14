@@ -25,7 +25,8 @@
             <span class="ptime">{{ p.last_msg_at | time }}</span>
           </span>
           <span class="pbottom">
-            <span class="plast">{{ p.last | short(34) or '—' }}</span>
+            {{ chan(p.channel, 'only') }}
+            <span class="plast">{{ p.last | short(28) or '—' }}</span>
             {% if p.unread %}<span class="badge">{{ p.unread }}</span>
             {% elif not p.ai_enabled %}<span class="dotmark" title="ведёт менеджер"></span>{% endif %}
           </span>
@@ -49,7 +50,7 @@
       <div class="chead">
         <b>{{ title }}</b>
         <span class="small muted">
-          {{ channels.get(active.channel, active.channel) }}
+          {{ chan(active.channel) }}
           {% if active.username %} · @{{ active.username }}{% endif %}
           {% if active.phone %} · {{ active.phone }}{% endif %}
         </span>

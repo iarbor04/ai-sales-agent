@@ -133,7 +133,7 @@
       <td><a href="/dialogs?c={{ b.cid }}">{{ b.name or b.username or b.phone or 'id' ~ b.cid }}</a></td>
       <td>{{ b.service or '—' }}</td>
       <td class="small">{{ b.staff_name or '—' }}</td>
-      <td class="small muted">{{ channels.get(b.channel, b.channel) }}</td>
+      <td>{{ chan(b.channel) }}</td>
       <td>
         <form method="post" action="/booking/{{ b.id }}/cancel">
           <button class="btn ghost small">отменить</button>

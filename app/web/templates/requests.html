@@ -23,7 +23,7 @@
       <td class="small muted">{{ r.id }}</td>
       <td>
         <a href="/dialogs?c={{ r.contact_id }}">{{ r.name or r.username or r.phone or 'id' ~ r.contact_id }}</a>
-        <div class="small muted">{{ channels.get(r.channel, r.channel) }}</div>
+        <div>{{ chan(r.channel) }}</div>
       </td>
       <td class="small">{{ r.reason | short(50) }}</td>
       <td class="small muted">{{ r.summary | short(60) }}</td>

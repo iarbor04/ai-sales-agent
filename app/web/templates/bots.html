@@ -57,7 +57,7 @@
     <div class="row between">
       <h2 style="margin:0">
         {{ b.title }}
-        <span class="pill">{{ {'max':'MAX','vk':'ВКонтакте','mail':'Почта','avito':'Авито'}.get(b.platform, 'Telegram') }}</span>
+        {{ chan(b.platform) }}
         {% if b.username %}<span class="muted small">@{{ b.username }}</span>{% endif %}
       </h2>
       <div>

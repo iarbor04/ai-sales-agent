@@ -1155,3 +1155,54 @@ async def widget_save(request: Request):
         if key in form:
             db.set_setting(key, str(form.get(key) or ""))
     return RedirectResponse("/widget", status_code=303)
+
+
+# ── каналы: витрина подключений ────────────────────────────────────────
+
+CHANNEL_CARDS = [
+    {"code": "tg", "title": "Telegram", "link": "/bots",
+     "about": "ИИ-бот отвечает клиентам, ведёт по сценарию и передаёт менеджеру. "
+              "Ботов можно подключить сколько угодно.",
+     "tags": ["ИИ-бот", "Рассылки", "Фото и файлы", "Голосовые", "Кнопки"]},
+    {"code": "web", "title": "Чат на сайте", "link": "/widget",
+     "about": "Виджет ставится на сайт одной строкой. Ни токенов, ни ключей — "
+              "работает сразу.",
+     "tags": ["ИИ-бот", "Своё оформление", "Без ключей"]},
+    {"code": "wa", "title": "WhatsApp Business", "link": "/settings",
+     "about": "Через официальный Cloud API. Нужен домен с HTTPS и режим вебхуков.",
+     "tags": ["ИИ-бот", "Фото и файлы", "Нужен домен"]},
+    {"code": "max", "title": "MAX", "link": "/bots",
+     "about": "Мессенджер VK. Токен берётся у @MasterBot внутри MAX.",
+     "tags": ["ИИ-бот", "Вложения", "Кнопки"]},
+    {"code": "vk", "title": "ВКонтакте", "link": "/bots",
+     "about": "Сообщения сообщества. Ключ доступа — в настройках сообщества, "
+              "раздел «Работа с API».",
+     "tags": ["ИИ-бот", "Картинки", "Long Poll и Callback"]},
+    {"code": "avito", "title": "Авито", "link": "/bots",
+     "about": "Переписка с покупателями в объявлениях. Доступ выдаёт продавец "
+              "в личном кабинете.",
+     "tags": ["ИИ-бот", "Чаты объявлений", "Нужен домен"]},
+    {"code": "mail", "title": "Почта", "link": "/bots",
+     "about": "Тот же агент отвечает на письма и держит переписку в одном треде.",
+     "tags": ["ИИ-бот", "IMAP и SMTP", "Ответ в тред"]},
+]
+
+
+@app.get("/channels", response_class=HTMLResponse)
+async def channels_page(request: Request):
+    """Витрина каналов: что подключено, что можно подключить."""
+    live = channels.active()
+    bots = db.bots(only_enabled=False)
+
+    cards = []
+    for card in CHANNEL_CARDS:
+        code = card["code"]
+        connected = code in live
+        # сколько ботов этой платформы заведено
+        count = sum(1 for b in bots if b["platform"] == code)
+        cards.append({**card, "connected": connected, "count": count,
+                      "contacts": db.q1(
+                          "SELECT COUNT(*) AS c FROM contacts WHERE channel = ?",
+                          (code,))["c"]})
+
+    return page(request, "channels.html", cards=cards, live=live)

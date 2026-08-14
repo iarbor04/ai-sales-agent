@@ -88,7 +88,7 @@
     {% for r in recent %}
     <tr>
       <td><a href="/dialogs?c={{ r.id }}">{{ r.name or r.username or r.phone or 'id' ~ r.id }}</a></td>
-      <td class="muted small">{{ channels.get(r.channel, r.channel) }}</td>
+      <td>{{ chan(r.channel) }}</td>
       <td>
         {% if r.ai_enabled %}<span class="pill ok">ИИ</span>
         {% else %}<span class="pill warn">{{ r.manager or 'менеджер' }}</span>{% endif %}

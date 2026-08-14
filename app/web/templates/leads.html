@@ -24,7 +24,7 @@
         <a href="/dialogs?c={{ r.cid }}">{{ r.name or r.contact_name or r.username or r.phone or 'id' ~ r.cid }}</a>
         {% if r.summary %}<div class="small muted">{{ r.summary | short(70) }}</div>{% endif %}
       </td>
-      <td>{{ channels.get(r.channel, r.channel) }}</td>
+      <td>{{ chan(r.channel) }}</td>
       <td>{{ r.product or '—' }}</td>
       <td>{{ r.need | short(40) or '—' }}</td>
       <td>{{ r.deadline or '—' }}</td>

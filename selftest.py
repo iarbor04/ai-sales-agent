@@ -238,6 +238,17 @@ def main() -> int:
     check("каждая платформа знает свой модуль",
           all(ch._module(p) is not None for p in ch.EXTRA_PLATFORMS))
 
+    section("Витрина каналов")
+    from app.web.main import CHANNEL_CARDS
+    codes = {c["code"] for c in CHANNEL_CARDS}
+    check("карточка есть у каждого канала", codes == set(config.CHANNEL_TITLES),
+          f"расходятся: {codes ^ set(config.CHANNEL_TITLES)}")
+    check("у каждой карточки есть описание и метки",
+          all(c["about"] and c["tags"] and c["link"] for c in CHANNEL_CARDS))
+    base_tpl = (ROOT / "app/web/templates/base.html").read_text()
+    missing_brand = [c for c in codes if f"'{c}'" not in base_tpl]
+    check("у каждого канала есть значок", not missing_brand, ", ".join(missing_brand))
+
     section("Чат для сайта")
     from app.channels import web as webchat
     token = webchat.new_visitor()

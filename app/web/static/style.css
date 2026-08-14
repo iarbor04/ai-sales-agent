@@ -528,3 +528,55 @@ label { display: block; font-size: 12.5px; color: var(--text-2); margin-bottom: 
 }
 .stepcard .fields { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
 .stepcard .off { opacity: .5; }
+
+/* ── значки каналов ─────────────────────────────────────────────────── */
+
+.chan {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12.5px; color: var(--text-2); white-space: nowrap;
+  vertical-align: middle;
+}
+.chan .glyph {
+  width: 20px; height: 20px; flex: 0 0 20px; border-radius: 5px;
+  display: grid; place-items: center;
+  background: color-mix(in srgb, var(--brand) 14%, transparent);
+  color: var(--brand);
+}
+.chan .glyph svg { width: 13px; height: 13px; display: block; }
+.chan.big .glyph { width: 26px; height: 26px; flex-basis: 26px; border-radius: 7px; }
+.chan.big .glyph svg { width: 16px; height: 16px; }
+.chan.only .cname { display: none; }
+.chan.solid .glyph { background: var(--brand); color: #fff; }
+
+/* ── витрина каналов ────────────────────────────────────────────────── */
+
+.chgrid {
+  display: grid; gap: 14px; margin-bottom: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+}
+.chcard {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 18px; color: var(--text);
+  box-shadow: var(--shadow-sm); display: flex; flex-direction: column; gap: 10px;
+  transition: border-color .14s ease, box-shadow .14s ease, transform .08s ease;
+}
+.chcard:hover {
+  text-decoration: none; border-color: var(--border-strong, #d7dade);
+  box-shadow: var(--shadow); transform: translateY(-1px);
+}
+.chcard.on { border-left: 3px solid var(--brand); }
+.chtop { display: flex; align-items: center; gap: 11px; }
+.chname { flex: 1; min-width: 0; display: flex; align-items: center;
+  gap: 8px; flex-wrap: wrap; }
+.chname b { font-size: 15px; }
+.chgo { color: var(--text-3); font-size: 20px; line-height: 1; }
+.chabout { margin: 0; color: var(--text-2); font-size: 13px; }
+.chtags { display: flex; flex-wrap: wrap; gap: 6px; }
+.chtag {
+  font-size: 11.5px; padding: 3px 9px; border-radius: 20px;
+  background: var(--surface-2); color: var(--text-2);
+}
+.chstat {
+  font-size: 12px; color: var(--text-3);
+  border-top: 1px solid var(--border-soft); padding-top: 9px; margin-top: 2px;
+}
