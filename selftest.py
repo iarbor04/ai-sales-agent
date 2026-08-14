@@ -249,6 +249,16 @@ def main() -> int:
     missing_brand = [c for c in codes if f"'{c}'" not in base_tpl]
     check("у каждого канала есть значок", not missing_brand, ", ".join(missing_brand))
 
+    # у мессенджеров — настоящие логотипы файлами, а не наши рисунки
+    logos = ROOT / "app/web/static/logos"
+    need_logos = ["telegram.svg", "whatsapp.svg", "vk.svg", "max.svg", "avito.svg"]
+    absent = [n for n in need_logos if not (logos / n).exists()]
+    check("настоящие логотипы на месте", not absent, ", ".join(absent))
+    check("логотипы лежат локально, не по внешним ссылкам",
+          "http" not in "".join(
+              (logos / n).read_text(errors="ignore")[:200] for n in need_logos
+              if (logos / n).exists() and n != "max.svg"))
+
     section("Чат для сайта")
     from app.channels import web as webchat
     token = webchat.new_visitor()

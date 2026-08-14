@@ -8,40 +8,32 @@
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-{# Значок канала: узнаваемая форма плюс фирменный цвет.
-   Рисуем сами, без обращений наружу — приложение должно работать
-   и на сервере без интернета, и в закрытом контуре. #}
+{# Значок канала. Настоящие логотипы лежат файлами в static/logos —
+   мессенджеры узнаются по ним, а не по нашим рисункам. Файлы свои,
+   наружу за картинками приложение не ходит: работает и без интернета.
+   Для почты и чата на сайте бренда нет, поэтому там наши глифы. #}
 {% macro chan(code, size='') %}
 {%- set brand = {
-  'tg':   ('#2AABEE', 'Telegram'),
-  'wa':   ('#25D366', 'WhatsApp'),
-  'max':  ('#5B4CF5', 'MAX'),
-  'vk':   ('#0077FF', 'ВКонтакте'),
-  'mail': ('#7A8595', 'Почта'),
-  'avito':('#00AAFF', 'Авито'),
-  'web':  ('#0a7c47', 'Чат на сайте')
-}.get(code, ('#8b939e', code)) -%}
-<span class="chan {{ size }}" title="{{ brand[1] }}">
-  <span class="glyph" style="--brand: {{ brand[0] }}">
-    {%- if code == 'tg' -%}
-    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M21.6 4.3 2.9 11.5c-.9.3-.9 1.6.1 1.9l4.7 1.5 1.8 5.6c.3.8 1.3 1 1.9.4l2.6-2.5 4.6 3.4c.7.5 1.7.1 1.9-.7l3.2-15c.2-.9-.7-1.6-1.5-1.3zM9.4 14.6l-.4 3.7-1.3-4.1 9.1-5.6-7.4 6z"/></svg>
-    {%- elif code == 'wa' -%}
-    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 0 0-8.6 15L2 22l5.2-1.4A10 10 0 1 0 12 2zm5.5 14c-.3.7-1.5 1.3-2.1 1.4-.6.1-1.2.1-2-.1-1.9-.6-3.6-2.1-4.7-3.8-.5-.8-.9-1.7-.9-2.6 0-.9.5-1.6.9-1.9.2-.2.5-.3.7-.3h.5c.2 0 .4 0 .6.5l.7 1.7c.1.2 0 .4-.1.5l-.4.5c-.1.1-.2.3-.1.5.4.8 1 1.4 1.7 1.9.3.2.5.2.7 0l.6-.7c.2-.2.3-.2.5-.1l1.6.8c.2.1.4.2.4.4 0 .2 0 .8-.3 1.3z"/></svg>
+  'tg':   ('Telegram',     'telegram.svg'),
+  'wa':   ('WhatsApp',     'whatsapp.svg'),
+  'max':  ('MAX',          'max.svg'),
+  'vk':   ('ВКонтакте',    'vk.svg'),
+  'avito':('Авито',        'avito.svg'),
+  'mail': ('Почта',        ''),
+  'web':  ('Чат на сайте', '')
+}.get(code, (code, '')) -%}
+<span class="chan {{ size }}" title="{{ brand[0] }}">
+  <span class="glyph{{ ' plain' if brand[1] }}"
+        style="--brand: {{ {'mail': '#7A8595', 'web': '#0a7c47'}.get(code, '#8b939e') }}">
+    {%- if brand[1] -%}
+    <img src="/static/logos/{{ brand[1] }}" alt="{{ brand[0] }}">
     {%- elif code == 'mail' -%}
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><rect x="2.5" y="4.5" width="19" height="15" rx="2.5"/><path d="m3 6.5 9 6.5 9-6.5"/></svg>
-    {%- elif code == 'web' -%}
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><circle cx="12" cy="12" r="9.2"/><path d="M2.8 12h18.4"/><path d="M12 2.8c2.6 2.5 4 5.8 4 9.2s-1.4 6.7-4 9.2c-2.6-2.5-4-5.8-4-9.2s1.4-6.7 4-9.2z"/></svg>
-    {%- elif code == 'vk' -%}
-    <svg viewBox="0 0 24 24"><text x="12" y="16.5" text-anchor="middle" font-size="10.5" font-weight="700" fill="currentColor" font-family="-apple-system,Arial">VK</text></svg>
-    {%- elif code == 'max' -%}
-    <svg viewBox="0 0 24 24"><text x="12" y="16.5" text-anchor="middle" font-size="9.5" font-weight="700" fill="currentColor" font-family="-apple-system,Arial">MAX</text></svg>
-    {%- elif code == 'avito' -%}
-    <svg viewBox="0 0 24 24"><circle cx="8" cy="8.5" r="3.1" fill="currentColor" opacity=".55"/><circle cx="16.2" cy="15.6" r="4.4" fill="currentColor"/></svg>
     {%- else -%}
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><circle cx="12" cy="12" r="9"/></svg>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><circle cx="12" cy="12" r="9.2"/><path d="M2.8 12h18.4"/><path d="M12 2.8c2.6 2.5 4 5.8 4 9.2s-1.4 6.7-4 9.2c-2.6-2.5-4-5.8-4-9.2s1.4-6.7 4-9.2z"/></svg>
     {%- endif -%}
   </span>
-  <span class="cname">{{ brand[1] }}</span>
+  <span class="cname">{{ brand[0] }}</span>
 </span>
 {% endmacro %}
 
