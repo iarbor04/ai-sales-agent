@@ -16,6 +16,30 @@ from . import db
 
 _WORD = re.compile(r"[a-zA-Zа-яА-ЯёЁ0-9]+")
 
+# Клиент спрашивает «шапку на зиму», а в прайсе стоит «Сезон: Зима». Без
+# нормализации окончаний это разные слова, строка не находится, и агент зовёт
+# менеджера на вопрос, ответ на который у него есть. Полноценный стеммер тут
+# не нужен: достаточно отрезать частые окончания, оставив основу.
+_ENDINGS = sorted(
+    ("иями", "ями", "ами", "ого", "его", "ому", "ему", "ыми", "ими", "ой", "ей",
+     "ий", "ый", "ая", "яя", "ое", "ее", "ие", "ые", "ах", "ях", "ам", "ям",
+     "ом", "ем", "ов", "ев", "ую", "юю", "ии", "а", "е", "и", "о", "у", "ы",
+     "ь", "я", "ю"),
+    key=len,
+    reverse=True,
+)
+_MIN_STEM = 3
+
+
+def stem(word: str) -> str:
+    """Основа слова: «зиму», «зима» и «зимы» должны совпасть, «мех» — остаться."""
+    for ending in _ENDINGS:
+        if word.endswith(ending) and len(word) - len(ending) >= _MIN_STEM:
+            return word[:-len(ending)]
+    if len(word) >= 4 and word.endswith("s") and not word.endswith("ss"):
+        return word[:-1]
+    return word
+
 # Слова, которые есть почти в каждом тексте и только шумят.
 STOP = {
     "и", "в", "во", "не", "что", "он", "на", "я", "с", "со", "как", "а", "то",
@@ -34,7 +58,7 @@ _size: int = -1
 
 
 def tokenize(text: str) -> list[str]:
-    return [w for w in (t.lower() for t in _WORD.findall(text or "")) if w not in STOP]
+    return [stem(w) for w in (t.lower() for t in _WORD.findall(text or "")) if w not in STOP]
 
 
 def _build() -> None:
