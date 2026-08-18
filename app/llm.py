@@ -34,6 +34,23 @@ class LLMError(RuntimeError):
     поэтому он написан для человека, а не для разработчика.
     """
 
+
+class LLMTruncated(LLMError):
+    """Ответ обрезан лимитом токенов — значит, JSON пришёл неполным."""
+
+
+# Рассуждающие модели тратят на размышления тот же бюджет, что и на ответ:
+# gpt-5 уходило 768 токенов на рассуждения из 900, и JSON обрывался на
+# середине. Лимит — это потолок, а не предоплата: платится только за
+# использованное, поэтому запас ничего не стоит.
+ANSWER_TOKENS = 2500
+SUMMARY_TOKENS = 800
+
+# Глубокие размышления в заполнении шаблона ответа не нужны и только съедают
+# бюджет. Параметр понимают и OpenAI, и Anthropic, и Google, и DeepSeek;
+# модели без рассуждений его просто игнорируют.
+REASONING = {"effort": "low"}
+
 # Напоминание для второй попытки: слабые модели забывают про формат.
 JSON_REMINDER = (
     "\n\nВАЖНО: предыдущий ответ был отклонён, потому что это не JSON. "
@@ -140,7 +157,8 @@ def _failure(status: int, detail: str, model: str) -> str:
     return f"OpenRouter вернул ошибку {status}{tail}"
 
 
-async def _call(system: str, user: str, max_tokens: int = 900) -> str:
+async def _call(system: str, user: str, max_tokens: int = ANSWER_TOKENS,
+                strict: bool = True) -> str:
     """Один запрос к модели. Ошибку не проглатывает, а объясняет.
 
     Раньше любая неудача возвращала пустую строку, и владелец видел только
@@ -154,6 +172,7 @@ async def _call(system: str, user: str, max_tokens: int = 900) -> str:
     payload = {
         "model": model,
         "max_tokens": max_tokens,
+        "reasoning": REASONING,
         "messages": [
             {"role": "system", "content": system},
             {"role": "user", "content": user},
@@ -196,7 +215,16 @@ async def _call(system: str, user: str, max_tokens: int = 900) -> str:
     choices = body.get("choices") or []
     if not choices:
         raise LLMError(f"модель «{model}» вернула пустой ответ")
-    return (choices[0].get("message", {}).get("content") or "").strip()
+    text = (choices[0].get("message", {}).get("content") or "").strip()
+
+    # Обрезанный ответ выглядел как «модель ответила не по формату», и владелец
+    # искал причину в модели, а не в лимите.
+    if strict and choices[0].get("finish_reason") == "length":
+        raise LLMTruncated(
+            f"ответ модели «{model}» не поместился в лимит {max_tokens} токенов")
+    if not text:
+        raise LLMError(f"модель «{model}» вернула пустой ответ")
+    return text
 
 
 _key_cache: tuple[str, float, dict] | None = None
@@ -252,7 +280,9 @@ async def check_model() -> dict:
     """Живой пробный запрос выбранной моделью — то же, что делает агент."""
     model = current_model()
     try:
-        reply = await _call("Ответь одним словом: ок.", "Проверка связи.", max_tokens=16)
+        # Запас на рассуждения: с коротким лимитом рассуждающая модель не
+        # успевает даже начать ответ, и проверка врала бы про поломку.
+        reply = await _call("Ответь одним словом: ок.", "Проверка связи.", max_tokens=600)
     except LLMError as exc:
         return {"ok": False, "model": model, "detail": str(exc)}
     if not reply:
@@ -408,6 +438,14 @@ async def answer(contact_id: int, question: str) -> dict:
     system = _system_prompt() + _script_block(contact_id) + booking_mod.slots_for_prompt()
     try:
         raw = await _call(system, user)
+    except LLMTruncated as exc:
+        # Рассуждения оказались длиннее ожидаемого — даём вдвое больше запаса.
+        log.info("%s, пробуем с большим запасом", exc)
+        try:
+            raw = await _call(system, user, max_tokens=ANSWER_TOKENS * 2)
+        except LLMError as inner:
+            fallback["handoff_reason"] = str(inner)
+            return fallback
     except LLMError as exc:
         fallback["handoff_reason"] = str(exc)
         return fallback
@@ -456,7 +494,9 @@ async def summarize(contact_id: int) -> str:
         "Только факты из переписки, без выдумок. Верни голый текст без markdown."
     )
     try:
-        return await _call(system, _format_history(rows), max_tokens=200)
+        # Резюме — обычный текст: обрезанное всё равно полезнее пустого.
+        return await _call(system, _format_history(rows),
+                           max_tokens=SUMMARY_TOKENS, strict=False)
     except LLMError as exc:
         # резюме — не главное: без него карточка лида просто уйдёт короче
         log.warning("резюме не составлено: %s", exc)

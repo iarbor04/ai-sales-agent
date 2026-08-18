@@ -230,12 +230,82 @@ def main() -> int:
     check("сообщения из адреса выводятся на странице",
           "query_params.get('error')" in (ROOT / "app/web/templates/base.html").read_text(encoding="utf-8"))
 
+    # Рассуждающая модель (gpt-5) тратила на размышления тот же лимит, что и на
+    # ответ: JSON обрывался, и владелец видел «ответила не по формату».
+    def truncating_server(script: list[dict]):
+        """Локальная заглушка OpenRouter. Отдаёт ответы по списку, по одному на запрос."""
+        import http.server
+        import json as _json
+        import threading
+
+        state = {"n": 0}
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+
+            def do_POST(self):
+                self.rfile.read(int(self.headers.get("content-length") or 0))
+                body = script[min(state["n"], len(script) - 1)]
+                state["n"] += 1
+                raw = _json.dumps(body).encode()
+                self.send_response(200)
+                self.send_header("content-type", "application/json")
+                self.send_header("content-length", str(len(raw)))
+                self.end_headers()
+                self.wfile.write(raw)
+
+        server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        return server, state
+
+    def reply_body(content: str, finish: str = "stop") -> dict:
+        return {"choices": [{"finish_reason": finish, "message": {"content": content}}]}
+
+    async def truncation() -> None:
+        db.set_setting("openrouter_key", "sk-or-v1-selftest-0000000000")
+        db.set_setting("model", "openai/gpt-5")
+        cut = '{"reply": "У нас есть панама «Havana», цена 6720'
+        whole = '{"reply": "У нас есть панама «Havana», 6720 ₽.", "handoff": false, "fields": {}}'
+        server, state = truncating_server([reply_body(cut, "length"), reply_body(whole)])
+        original_url = llm.API_URL
+        llm.API_URL = f"http://127.0.0.1:{server.server_port}/chat"
+        try:
+            person = db.upsert_contact("tg", "906", "cut", "Обрыв", bot_id=bot_id)
+            result = await llm.answer(person["id"], "что у вас есть")
+            check("обрезанный лимитом ответ повторяется с большим запасом",
+                  state["n"] == 2 and not result["handoff"], f"запросов {state['n']}, {result}")
+            check("со второй попытки клиент получает ответ",
+                  "панама" in result["reply"].lower(), result["reply"])
+
+            # обрыв дважды — причина должна называть лимит, а не формат
+            server.shutdown()
+            server, state = truncating_server([reply_body(cut, "length")])
+            llm.API_URL = f"http://127.0.0.1:{server.server_port}/chat"
+            result = await llm.answer(person["id"], "что у вас есть")
+            check("если обрыв повторился, причина называет лимит токенов",
+                  result["handoff"] and "лимит" in result["handoff_reason"],
+                  result["handoff_reason"])
+
+            # резюме — обычный текст, обрезанное полезнее пустого
+            db.add_message(person["id"], "in", "client", "что у вас есть")
+            summary = await llm.summarize(person["id"])
+            check("обрезанное резюме не выбрасывается", summary.startswith("{\"reply\""), repr(summary))
+        finally:
+            llm.API_URL = original_url
+            server.shutdown()
+            db.set_setting("openrouter_key", "")
+            db.set_setting("model", "openai/gpt-4o-mini")
+
+    asyncio.run(truncation())
+
     async def model_failures() -> None:
         # ключ есть, но OpenRouter его не принимает — самый частый случай
         db.set_setting("openrouter_key", "sk-or-v1-selftest-0000000000")
         original = llm._call
 
-        async def refuse(system: str, user: str, max_tokens: int = 900) -> str:
+        async def refuse(system: str, user: str, max_tokens: int = 0,
+                         strict: bool = True) -> str:
             raise llm.LLMError("OpenRouter отклонил ключ (401): User not found")
 
         person = db.upsert_contact("tg", "903", "err", "Отказ", bot_id=bot_id)
@@ -250,7 +320,8 @@ def main() -> int:
               row is not None and "401" in (row["reason"] or ""),
               f"в обращении: {row['reason'] if row else 'обращения нет'}")
 
-        async def junk(system: str, user: str, max_tokens: int = 900) -> str:
+        async def junk(system: str, user: str, max_tokens: int = 0,
+                       strict: bool = True) -> str:
             return "Здравствуйте! Отвечаю обычным текстом вместо JSON."
 
         other = db.upsert_contact("tg", "904", "junk", "Мусор", bot_id=bot_id)
@@ -269,7 +340,8 @@ def main() -> int:
         # второй шанс — иначе диалог уходит человеку без причины
         calls = []
 
-        async def second_try(system: str, user: str, max_tokens: int = 900) -> str:
+        async def second_try(system: str, user: str, max_tokens: int = 0,
+                             strict: bool = True) -> str:
             calls.append(system)
             if len(calls) == 1:
                 return "Конечно, расскажу!"
@@ -401,6 +473,22 @@ def main() -> int:
           retrieval.stem("мех") == "мех" and retrieval.stem("фетр") == "фетр")
     check("агент находит зимнюю модель по вопросу «шапка на зиму»",
           "Бини" in retrieval.context_for("нужна тёплая шапка на зиму"))
+
+    # Общие вопросы — самые частые, а слов из прайса в них нет вообще. Пока
+    # каталог влезает в запрос, он уходит в модель целиком, без поиска.
+    for question in ("что у вас есть", "покажите ассортимент", "прайс"):
+        context = retrieval.context_for(question)
+        check(f"на «{question}» агент видит каталог",
+              "Панама" in context and "Бини" in context, context[:60])
+
+    # Панель показывала «ничего не нашлось» там, где агент видел весь каталог:
+    # проверка и агент обязаны спрашивать одно и то же.
+    check("проверка в панели совпадает с тем, что получит модель",
+          all(all(hit["text"] in retrieval.context_for(q) for hit in retrieval.hits_for(q))
+              and retrieval.hits_for(q)
+              for q in ("что у вас есть", "сколько стоит панама", "здравствуйте")))
+    check("на пустой запрос панель не врёт про находки",
+          len(retrieval.hits_for("")) == len(retrieval.hits_for("что угодно")))
 
     try:
         pricefile.save("прайс.xlsx", "это не таблица".encode("utf-8"))

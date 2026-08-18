@@ -142,11 +142,47 @@ def search(query: str, top_k: int = 4) -> list[dict]:
     ]
 
 
+def everything(budget_chars: int = 6000) -> list[dict]:
+    """Вся база знаний, сколько влезет в бюджет.
+
+    Нужна для общих вопросов вроде «что у вас есть» и «покажите ассортимент»:
+    в них нет ни одного слова из прайса, поиск по словам возвращает пустоту, и
+    агент звал менеджера на самый частый вопрос клиента. База знаний тут обычно
+    маленькая — прайс на десять строк это несколько сотен символов.
+    """
+    _ensure_fresh()
+    picked = []
+    used = 0
+    for doc in _index:
+        if used + len(doc["text"]) > budget_chars:
+            break
+        picked.append({"text": doc["text"], "url": doc["url"], "title": doc["title"], "score": 0.0})
+        used += len(doc["text"])
+    return picked
+
+
+def hits_for(query: str, budget_chars: int = 6000) -> list[dict]:
+    """Фрагменты, которые получит модель. Одно решение для агента и для панели.
+
+    Пока вся база знаний влезает в бюджет запроса, поиск по словам не нужен и
+    вреден: каталог из десяти строк — это меньше двухсот токенов, а любой промах
+    поиска превращался в «передаю менеджеру». На общий вопрос «что у вас есть»
+    слов из прайса нет вообще, и агент отказывался отвечать при полной базе.
+
+    Поиск включается только когда знаний больше, чем влезает в запрос.
+    """
+    _ensure_fresh()
+    total = sum(len(doc["text"]) for doc in _index)
+    if total and total <= budget_chars:
+        return everything(budget_chars)
+    return search(query, top_k=6) or everything(budget_chars)
+
+
 def context_for(query: str, budget_chars: int = 6000) -> str:
     """Готовый кусок контекста для модели — с указанием источников."""
     blocks = []
     used = 0
-    for hit in search(query, top_k=6):
+    for hit in hits_for(query, budget_chars):
         block = f"[Источник: {hit['title'] or hit['url']}]\n{hit['text']}"
         if used + len(block) > budget_chars:
             break
