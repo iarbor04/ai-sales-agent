@@ -172,16 +172,22 @@ async def hand_off(contact_id: int, reason: str, summary: str = "",
 
     db.set_ai(contact_id, False)
     db.run("UPDATE contacts SET manager = ? WHERE id = ?", (manager or None, contact_id))
-    db.add_message(contact_id, "out", "system", f"Передано менеджеру: {reason}", is_read=True)
+
+    # Пустое поле «что агент пишет клиенту при передаче» означает тишину для
+    # клиента: разговор для него просто обрывается. Это законный выбор
+    # владельца, но оператор обязан видеть, что человек остался без ответа.
+    note = db.setting("handoff_note", "").strip()
+    silent_for_client = silent or not note
+    tail = " — клиент ничего не получил" if silent_for_client else ""
+    db.add_message(contact_id, "out", "system",
+                   f"Передано менеджеру: {reason}{tail}", is_read=True)
 
     # обращение в лог: отсюда кнопки «взять в работу» и «передать»
     request_id = db.open_request(contact_id, reason)
 
     # silent — когда отправка клиенту уже не удалась, второй раз не пробуем
-    if not silent:
-        note = db.setting("handoff_note", "").strip()
-        if note:
-            await base.send(contact_id, note, author="ai")
+    if not silent and note:
+        await base.send(contact_id, note, author="ai")
 
     asyncio.create_task(notify.handed_off(contact_id, reason, manager, request_id))
 

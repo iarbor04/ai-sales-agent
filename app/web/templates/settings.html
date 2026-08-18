@@ -104,7 +104,16 @@
         placeholder="Анна, Игорь, Пётр"></div>
     <p class="muted small">Ответственный назначается по кругу, чтобы лиды не падали на одного.</p>
     <div class="field"><label>Что агент пишет клиенту при передаче</label>
-      <textarea name="handoff_note">{{ values.handoff_note }}</textarea></div>
+      <textarea name="handoff_note" placeholder="Передаю вас менеджеру, он ответит здесь же.">{{ values.handoff_note }}</textarea>
+      {% if not values.handoff_note.strip() %}
+      <span class="note" style="color:var(--danger)">
+        Поле пустое: при передаче менеджеру клиент не получит ничего, и разговор
+        для него просто оборвётся. Впишите фразу, если это не то, чего вы хотите.
+      </span>
+      {% else %}
+      <span class="note">Эту фразу клиент увидит в момент передачи. Пустое поле — клиент не получит ничего.</span>
+      {% endif %}
+    </div>
   </div>
 
   <div class="card">

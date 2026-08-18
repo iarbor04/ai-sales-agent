@@ -169,6 +169,27 @@ def main() -> int:
         check("просьба о человеке передаёт диалог", not row["ai_enabled"])
         check("заводится обращение", req is not None and req["status"] == "new")
 
+        # пустое поле = тишина для клиента; оператор должен видеть это в диалоге
+        db.set_setting("handoff_note", "")
+        mute = db.upsert_contact("tg", "907", "mute", "Тишина", bot_id=bot_id)
+        await sales.hand_off(mute["id"], "проверка тишины")
+        note_row = db.q1("SELECT text FROM messages WHERE contact_id = ? AND author = 'system'"
+                         " ORDER BY id DESC", (mute["id"],))
+        check("при пустой фразе передачи в диалоге видно, что клиент молчит",
+              note_row is not None and "клиент ничего не получил" in note_row["text"],
+              note_row["text"] if note_row else "нет системной записи")
+        db.set_setting("handoff_note", "Передаю вас менеджеру, он ответит здесь же.")
+        talk = db.upsert_contact("tg", "908", "talk", "Ответ", bot_id=bot_id)
+        await sales.hand_off(talk["id"], "проверка фразы")
+        note_row = db.q1("SELECT text FROM messages WHERE contact_id = ? AND author = 'system'"
+                         " ORDER BY id DESC", (talk["id"],))
+        check("с заполненной фразой пометки о тишине нет",
+              note_row is not None and "клиент ничего не получил" not in note_row["text"])
+        # обращения этих двух проверок закрываем: следующая проверка считает открытые
+        for row in db.q("SELECT id FROM requests WHERE contact_id IN (?, ?)",
+                        (mute["id"], talk["id"])):
+            db.close_request(row["id"])
+
         await sales.hand_off(human["id"], "ещё раз", silent=True)
         count = db.q1("SELECT COUNT(*) c FROM requests WHERE contact_id = ?",
                       (human["id"],))["c"]
@@ -619,11 +640,19 @@ def main() -> int:
     db.run("INSERT INTO staff (name) VALUES ('Ольга')")
     db.set_setting("booking_enabled", "1")
     check("часы работы засеяны", len(bk.hours()) >= 5, f"дней: {len(bk.hours())}")
-    slots = bk.free_slots(limit=6)
+    slots = bk.free_slots(limit=12)
     check("свободные окна считаются", len(slots) > 0, f"окон: {len(slots)}")
+    # Шаг меряем внутри одного дня: разрыв между днями — это ночь, а не сетка.
+    # Раньше проверка сравнивала последнее окно дня с первым окном следующего и
+    # падала во второй половине дня, когда на сегодня оставалось одно окно.
+    from datetime import datetime as _dt
+    steps = [(second["at"] - first["at"]) // 60
+             for first, second in zip(slots, slots[1:])
+             if _dt.fromtimestamp(first["at"]).date() == _dt.fromtimestamp(second["at"]).date()]
+    check("шаг сетки равен длительности услуги",
+          bool(steps) and all(step == 40 for step in steps), f"шаги {steps}")
+
     if slots:
-        step = (slots[1]["at"] - slots[0]["at"]) // 60 if len(slots) > 1 else 40
-        check("шаг сетки равен длительности услуги", step == 40, f"шаг {step} мин")
         contact = db.upsert_contact("tg", "950", "bk", "Клиент", bot_id=bot_id)
         first = bk.book(contact["id"], slots[0]["label"])
         check("запись создаётся", first["ok"], str(first))
