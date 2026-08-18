@@ -13,8 +13,14 @@
       {% if whatsapp_on %}<span class="pill ok">подключён</span>
       {% else %}<span class="pill off">не подключён</span>{% endif %}</td></tr>
     <tr><td>Модель</td><td class="right">
-      {% if ai_ready %}<span class="pill ok">ключ есть — {{ key_source }}</span>
-      {% else %}<span class="pill warn">нет ключа — агент молчит и зовёт менеджера</span>{% endif %}</td></tr>
+      {% if not ai_ready %}<span class="pill warn">нет ключа — агент молчит и зовёт менеджера</span>
+      {% elif key_check and key_check.ok %}<span class="pill ok">ключ работает — {{ key_source }}</span>
+      {% else %}<span class="pill bad">ключ не принят OpenRouter</span>{% endif %}</td></tr>
+    {% if ai_ready and key_check and not key_check.ok %}
+    <tr><td colspan="2" class="small" style="color:var(--danger)">
+      OpenRouter: {{ key_check.detail }}. Пока ключ не принят, агент не отвечает
+      клиентам и передаёт каждый диалог менеджеру.</td></tr>
+    {% endif %}
     <tr><td>Режим приёма</td><td class="right"><span class="pill">{{ mode }}</span></td></tr>
   </table>
   {% if mode != 'webhook' and whatsapp_on %}
@@ -42,7 +48,7 @@
     <h2>Модель</h2>
     <div class="field">
       <label>Ключ OpenRouter</label>
-      <input type="password" name="openrouter_key" autocomplete="new-password"
+      <input type="password" name="openrouter_key" autocomplete="off" data-lpignore="true"
         placeholder="{% if ai_ready %}ключ сохранён — впишите новый, чтобы заменить{% else %}sk-or-v1-...{% endif %}">
       <span class="muted small">
         Взять на openrouter.ai → Keys. Сам ключ не показываем — только заменяем.
@@ -70,6 +76,13 @@
         Дешевле и быстрее — модели с пометкой mini или flash.
       </span>
     </div>
+    <div class="row" style="margin-bottom:12px">
+      <button class="btn ghost small" type="button" onclick="checkAi()">Проверить ключ и модель</button>
+    </div>
+    <p class="note" id="aiout">
+      {% if key_check %}Ключ: {{ key_check.detail }}.{% endif %}
+      Проверка отправляет один короткий запрос выбранной моделью — то же, что делает агент.
+    </p>
     <label class="check">
       <input type="checkbox" name="ai_enabled_global"
         {{ 'checked' if values.ai_enabled_global == '1' }}>
@@ -99,7 +112,7 @@
     <p class="lead-text">
       Лиды и так видны в разделе «Лиды». Это на случай, если отделу удобнее
       работать в таблице: строки обновляются на месте, дублей не будет.
-      Базу знаний из таблицы подключают в разделе
+      Прайс и другие таблицы знаний загружают файлом в разделе
       <a href="/knowledge">База знаний</a>.
     </p>
     <div class="row formgap">
@@ -125,7 +138,7 @@
 </form>
 
 <form method="post" action="/settings/sheets/sync" style="margin-top:12px">
-  <button class="btn ghost" type="submit">Синхронизировать таблицы сейчас</button>
+  <button class="btn ghost" type="submit">Выгрузить лидов в таблицу сейчас</button>
 </form>
 
 <script>
@@ -151,6 +164,23 @@ async function loadModels() {
   document.getElementById('mcount').innerHTML =
     'Доступно моделей: <b>' + rows.length + '</b>. ' +
     'Дешевле и быстрее — модели с пометкой mini или flash.';
+}
+
+// Проверка ключа и модели одной кнопкой: список моделей отдаётся без ключа,
+// поэтому «модели загрузились» ничего не доказывает.
+async function checkAi() {
+  const out = document.getElementById('aiout');
+  out.style.color = '';
+  out.textContent = 'проверяю…';
+  try {
+    const resp = await fetch('/settings/ai/check');
+    const data = await resp.json();
+    out.textContent = 'Ключ: ' + data.key.detail + '. Модель: ' + data.model.detail;
+    if (!data.key.ok || !data.model.ok) out.style.color = 'var(--danger)';
+  } catch (err) {
+    out.style.color = 'var(--danger)';
+    out.textContent = 'Проверка не выполнена: ' + err;
+  }
 }
 
 async function checkSheets() {

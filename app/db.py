@@ -346,7 +346,6 @@ DEFAULT_SETTINGS = {
     # ключ вставляется в панели; .env остаётся запасным вариантом
     "openrouter_key": "",
     # Google Таблицы: база знаний на чтение, лиды на запись
-    "sheets_kb_url": "",
     "sheets_crm_id": "",
     "sheets_crm_tab": "Лиды",
     # как часто обходить сайты конкурентов, в часах
@@ -390,6 +389,7 @@ def init() -> None:
                 pass
 
     _migrate_contacts_key()
+    _migrate_sheet_knowledge()
 
     for key, value in DEFAULT_SETTINGS.items():
         run("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (key, value))
@@ -409,6 +409,25 @@ def init() -> None:
                 " VALUES (NULL, ?, ?, ?, ?, 1)",
                 (position, title, goal, field),
             )
+
+
+def _migrate_sheet_knowledge() -> None:
+    """Прайс, прочитанный когда-то из Google Таблицы, оставить в базе знаний.
+
+    Источник «таблица по ссылке» убран: публикация открывала прайс всему
+    интернету, а закрытая таблица молча отдавала страницу входа вместо данных.
+    Уже загруженный текст не выбрасываем — он становится обычным источником
+    в списке файлов, и владелец заменит его загрузкой xlsx или удалит сам.
+    """
+    row = q1("SELECT id FROM kb_pages WHERE url = 'sheet://knowledge'")
+    if row:
+        run(
+            "UPDATE kb_pages SET url = 'file://прайс-из-google-таблицы',"
+            " title = 'Прайс из Google Таблицы (загрузите файл, чтобы обновить)'"
+            " WHERE id = ?",
+            (row["id"],),
+        )
+    run("DELETE FROM settings WHERE key = 'sheets_kb_url'")
 
 
 def _migrate_contacts_key() -> None:

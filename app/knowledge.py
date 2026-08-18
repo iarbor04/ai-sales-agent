@@ -23,6 +23,12 @@ from . import config, db
 
 log = logging.getLogger("kb")
 
+# Обходчик работает только со страницами сайта. Источники вроде вписанного
+# руками текста и загруженного файла живут в тех же kb_pages, и без этого
+# условия обходчик пытался «перечитать» их по сети, помечал ошибкой и выбрасывал
+# из поиска.
+WEB_PAGES = "url LIKE 'http%'"
+
 UA = "Mozilla/5.0 (compatible; AiSalesBot/1.0)"
 
 # Расширения, которые заведомо не текст.
@@ -192,6 +198,7 @@ def fetch_pending() -> dict:
     """Выкачать текст для включённых страниц, у которых его ещё нет."""
     pages = db.q(
         "SELECT * FROM kb_pages WHERE included = 1 AND (text IS NULL OR text = '')"
+        f" AND {WEB_PAGES}"
     )
     loaded, skipped = 0, 0
     for page in pages:
@@ -284,10 +291,7 @@ def refresh(force: bool = False) -> dict:
     Страницу, которая перестала открываться, помечаем ошибкой и выкидываем
     из поиска: дыра в базе знаний безопаснее устаревшего ответа.
     """
-    pages = db.q(
-        "SELECT * FROM kb_pages WHERE included = 1"
-        " AND url NOT LIKE 'manual://%' AND url NOT LIKE 'sheet://%'"
-    )
+    pages = db.q(f"SELECT * FROM kb_pages WHERE included = 1 AND {WEB_PAGES}")
     changed = gone = same = 0
 
     for page in pages:
@@ -329,8 +333,7 @@ def refresh(force: bool = False) -> dict:
 
 def refresh_due() -> bool:
     """Пора ли перечитывать сайт — по расписанию из настроек."""
-    if not db.q1("SELECT 1 FROM kb_pages WHERE included = 1"
-                 " AND url NOT LIKE 'manual://%' AND url NOT LIKE 'sheet://%'"):
+    if not db.q1(f"SELECT 1 FROM kb_pages WHERE included = 1 AND {WEB_PAGES}"):
         return False
     try:
         hours = int(db.setting("kb_refresh_hours", "24") or 24)

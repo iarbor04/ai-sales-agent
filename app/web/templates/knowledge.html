@@ -17,35 +17,45 @@
 </div>
 
 <div class="card">
-  <h2>Google Таблица <span class="hint">самый удобный способ для прайса</span></h2>
+  <h2>Прайс файлом <span class="hint">самый быстрый способ</span></h2>
   <p class="lead-text">
-    Держите цены и условия в таблице — правите их сами, агент подхватывает
-    изменения. Каждая строка становится фактом: заголовки столбцов и значения.
-    Подойдёт и таблица «вопрос / ответ», и прайс на десять колонок.
+    Загрузите xlsx или csv — каждая строка станет фактом: заголовки столбцов и
+    значения. Подойдёт и прайс на десять колонок, и таблица «вопрос / ответ».
+    Ни ключей, ни публикации таблицы: файл никуда не уходит с вашего сервера.
   </p>
-  <form method="post" action="/knowledge/sheet">
-    <div class="row">
-      <div class="field">
-        <label>Ссылка на таблицу</label>
-        <input type="text" name="url" value="{{ sheet_url }}"
-          placeholder="https://docs.google.com/spreadsheets/d/...">
-      </div>
-      <button class="btn" type="submit">
-        {{ 'Обновить' if sheet_url else 'Подключить' }}
-      </button>
+  <form method="post" action="/knowledge/file" enctype="multipart/form-data" class="row">
+    <div class="field">
+      <label>Файл с прайсом или условиями</label>
+      <input type="file" name="file" accept=".xlsx,.csv,.tsv">
+      <span class="note">
+        Первая строка — заголовки столбцов. Столбцы с закупкой, наценкой и
+        поставщиком агенту не показываются. Старый формат .xls не читается —
+        пересохраните как xlsx.
+      </span>
     </div>
+    <button class="btn" type="submit">Загрузить</button>
   </form>
-  {% if sheet %}
+
+  {% if files %}
+  <table style="margin-top:8px">
+    <tr><th>Файл</th><th style="width:100px">Символов</th>
+        <th style="width:130px">Загружен</th><th style="width:110px"></th></tr>
+    {% for f in files %}
+    <tr>
+      <td>{{ f.title or f.url }}</td>
+      <td>{{ f.chars or '—' }}</td>
+      <td class="small dim">{{ f.fetched_at | dt or '—' }}</td>
+      <td class="right">
+        <form method="post" action="/knowledge/file/{{ f.id }}/delete">
+          <button class="btn ghost small danger" type="submit">Убрать</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
   <div class="callout">
-    <b>Подключена.</b> Загружено {{ sheet.chars }} символов,
-    обновлено {{ sheet.fetched_at | dt }}. Перечитывается автоматически раз в полчаса.
-  </div>
-  {% else %}
-  <div class="callout">
-    <b>Как открыть доступ:</b> в таблице Файл → Поделиться → Опубликовать в интернете →
-    Опубликовать. Скопируйте ссылку сюда. Ключи и настройки Google не нужны.
-    Учтите: опубликованную таблицу может открыть любой, у кого есть ссылка —
-    личные данные туда не кладите.
+    Файл не обновляется сам: поменяли цены — загрузите его заново, тем же
+    именем. Агент сразу начнёт отвечать по новым данным.
   </div>
   {% endif %}
 </div>
@@ -121,7 +131,7 @@
 <div class="card">
   <h2>Вписать руками</h2>
   <p class="lead-text">
-    Всё, чего нет ни на сайте, ни в таблице: условия оплаты, частые вопросы,
+    Всё, чего нет ни на сайте, ни в файле: условия оплаты, частые вопросы,
     что отвечать на возражения.
   </p>
   <form method="post" action="/knowledge/extra">

@@ -12,6 +12,7 @@ import logging
 import uuid
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import quote
 
 from fastapi import FastAPI, Form, Request
 from fastapi.responses import (
@@ -26,8 +27,8 @@ from fastapi.templating import Jinja2Templates
 from itsdangerous import BadSignature, URLSafeSerializer
 
 from .. import (
-    booking, broadcast, config, db, knowledge, llm, onboarding, retrieval,
-    rivals, sales, scheduler, sheets,
+    booking, broadcast, config, db, knowledge, llm, onboarding, pricefile,
+    retrieval, rivals, sales, scheduler, sheets,
 )
 from .. import channels
 from ..channels import base, telegram, whatsapp
@@ -347,14 +348,13 @@ async def lead_save(request: Request):
 @app.get("/knowledge", response_class=HTMLResponse)
 async def kb_page(request: Request):
     pages = db.q(
-        "SELECT * FROM kb_pages WHERE url NOT LIKE 'manual://%' AND url NOT LIKE 'sheet://%'"
+        f"SELECT * FROM kb_pages WHERE {knowledge.WEB_PAGES}"
         " ORDER BY included DESC, chars DESC, url LIMIT 500"
     )
-    sheet = db.q1("SELECT * FROM kb_pages WHERE url = 'sheet://knowledge'")
     last = db.setting("kb_last_refresh", "")
     return page(request, "knowledge.html", pages=pages, stats=knowledge.stats(),
                 site=db.setting("business_site", ""), extra=db.setting("kb_extra", ""),
-                sheet_url=db.setting("sheets_kb_url", ""), sheet=sheet,
+                files=pricefile.files(),
                 refresh_hours=db.setting("kb_refresh_hours", "24"),
                 last_refresh=int(last) if last.isdigit() else 0)
 
@@ -376,19 +376,33 @@ async def kb_schedule(hours: str = Form("24")):
     return RedirectResponse("/knowledge", status_code=303)
 
 
-@app.post("/knowledge/sheet")
-async def kb_sheet(url: str = Form("")):
-    """Таблица — такой же источник знаний, как сайт. Живёт здесь же."""
-    db.set_setting("sheets_kb_url", url.strip())
-    if url.strip():
-        await asyncio.to_thread(sheets.sync_knowledge)
-    else:
-        row = db.q1("SELECT id FROM kb_pages WHERE url = 'sheet://knowledge'")
-        if row:
-            db.run("DELETE FROM kb_chunks WHERE page_id = ?", (row["id"],))
-            db.run("DELETE FROM kb_pages WHERE id = ?", (row["id"],))
-    retrieval.invalidate()
-    return RedirectResponse("/knowledge", status_code=303)
+@app.post("/knowledge/file")
+async def kb_file(request: Request):
+    """Прайс файлом: xlsx или csv. Ключи, публикация и доступы не нужны."""
+    form = await request.form()
+    upload = form.get("file")
+    if upload is None or not getattr(upload, "filename", ""):
+        return RedirectResponse("/knowledge?error=" + quote("Выберите файл xlsx или csv"),
+                                status_code=303)
+    data = await upload.read()
+    try:
+        result = await asyncio.to_thread(pricefile.save, upload.filename, data)
+    except pricefile.PriceFileError as exc:
+        # Неудача не трогает уже загруженное: прежний прайс остаётся в базе знаний.
+        return RedirectResponse("/knowledge?error=" + quote(f"Файл не прочитан: {exc}"),
+                                status_code=303)
+
+    note = f"Из файла «{upload.filename}» прочитано строк: {result['rows']}."
+    if result["hidden"]:
+        note += " Внутренние столбцы агенту не показаны: " + ", ".join(result["hidden"]) + "."
+    return RedirectResponse("/knowledge?ok=" + quote(note), status_code=303)
+
+
+@app.post("/knowledge/file/{page_id}/delete")
+async def kb_file_delete(page_id: int):
+    pricefile.remove(page_id)
+    return RedirectResponse("/knowledge?ok=" + quote("Файл убран из базы знаний"),
+                            status_code=303)
 
 
 @app.post("/knowledge/discover")
@@ -404,7 +418,7 @@ async def kb_select(request: Request):
     """Сохранить, какие страницы включены, и загрузить включённые."""
     form = await request.form()
     keep = {int(key[5:]) for key in form if key.startswith("page_")}
-    for row in db.q("SELECT id FROM kb_pages WHERE url != 'manual://extra'"):
+    for row in db.q(f"SELECT id FROM kb_pages WHERE {knowledge.WEB_PAGES}"):
         db.run("UPDATE kb_pages SET included = ? WHERE id = ?",
                (1 if row["id"] in keep else 0, row["id"]))
     await asyncio.to_thread(knowledge.fetch_pending)
@@ -486,20 +500,52 @@ async def broadcast_retry(broadcast_id: int):
 
 # ── настройки ──────────────────────────────────────────────────────────
 
+# Ключ OpenRouter выглядит как sk-or-v1-…. Проверка нужна не для красоты:
+# менеджер паролей охотно подставляет в поле типа password пароль от панели,
+# и тогда рабочий ключ молча заменяется на мусор, а панель по-прежнему
+# показывает «ключ есть» — искать такую поломку потом очень долго.
+KEY_PREFIX = "sk-or"
+
+
+def _clean_key(raw: str) -> str:
+    """Убрать пробелы и переносы строк, которые прилипают при копировании."""
+    return "".join(str(raw or "").split())
+
+
+def _key_looks_real(key: str) -> bool:
+    return key.startswith(KEY_PREFIX) and len(key) >= 20
+
+
 @app.get("/settings", response_class=HTMLResponse)
 async def settings_page(request: Request):
     keys = ["business_name", "business_site", "greeting", "tone", "model",
             "operator_chat_id", "managers", "handoff_note", "ai_enabled_global",
-            "sheets_kb_url", "sheets_crm_id", "sheets_crm_tab"]
+            "sheets_crm_id", "sheets_crm_tab"]
     values = {key: db.setting(key, "") for key in keys}
     return page(request, "settings.html", values=values,
                 models=await llm.available_models(),
                 telegram_on=channels.telegram_enabled(),
                 whatsapp_on=config.whatsapp_enabled(),
                 ai_ready=llm.ai_ready(),
+                key_check=await llm.check_key(),
                 key_source=_key_source(),
                 sa_file=bool(config.GOOGLE_SA_FILE),
                 mode=config.MODE)
+
+
+@app.get("/settings/ai/check")
+async def settings_ai_check():
+    """Живая проверка: принят ли ключ и отвечает ли выбранная модель.
+
+    Раньше единственным признаком «всё хорошо» был загрузившийся список
+    моделей, а он отдаётся без ключа — поэтому отказ в генерации выглядел
+    загадочно. Здесь видно и ответ OpenRouter на ключ, и настоящий ответ модели.
+    """
+    key = await llm.check_key(force=True)
+    model = await llm.check_model() if key["ok"] else {
+        "ok": False, "model": llm.current_model(), "detail": "сначала нужен рабочий ключ",
+    }
+    return JSONResponse({"key": key, "model": model})
 
 
 def _key_source() -> str:
@@ -516,28 +562,44 @@ async def settings_save(request: Request):
     form = await request.form()
     for key in ("business_name", "business_site", "greeting", "tone", "model",
                 "operator_chat_id", "managers", "handoff_note",
-                "sheets_kb_url", "sheets_crm_id", "sheets_crm_tab"):
+                "sheets_crm_id", "sheets_crm_tab"):
         if key in form:
             db.set_setting(key, str(form.get(key) or ""))
 
     # Ключ пишем только если поле заполнили: пустое поле означает
     # «оставить как было», иначе ключ стирался бы при каждом сохранении.
-    new_key = str(form.get("openrouter_key") or "").strip()
+    raw_key = str(form.get("openrouter_key") or "")
+    new_key = _clean_key(raw_key)
+    if raw_key.strip() and not _key_looks_real(new_key):
+        return RedirectResponse(
+            "/settings?error=" + quote(
+                "Это не похоже на ключ OpenRouter — он начинается на sk-or-. "
+                "Сохранённый ключ оставлен без изменений."),
+            status_code=303)
     if new_key:
         db.set_setting("openrouter_key", new_key)
     if form.get("drop_key"):
         db.set_setting("openrouter_key", "")
 
     db.set_setting("ai_enabled_global", "1" if form.get("ai_enabled_global") else "0")
+
+    # Новый ключ проверяем сразу: узнать об отказе через неделю по молчащему
+    # агенту — худший из возможных вариантов.
+    if new_key:
+        check = await llm.check_key(force=True)
+        return RedirectResponse(
+            "/settings?" + ("ok=" if check["ok"] else "error=") + quote(check["detail"]),
+            status_code=303)
     return RedirectResponse("/settings", status_code=303)
 
 
 @app.post("/settings/sheets/sync")
 async def sheets_sync():
-    """Синхронизировать таблицы прямо сейчас, не дожидаясь планировщика."""
-    await asyncio.to_thread(sheets.sync_knowledge)
-    await sheets.sync_leads()
-    return RedirectResponse("/settings", status_code=303)
+    """Выгрузить лидов в таблицу прямо сейчас, не дожидаясь планировщика."""
+    result = await sheets.sync_leads()
+    return RedirectResponse(
+        "/settings?ok=" + quote(f"Выгружено лидов: {result.get('synced', 0)}"),
+        status_code=303)
 
 
 @app.get("/settings/sheets/check")
@@ -878,7 +940,7 @@ async def setup_page(request: Request, step: str = "bot"):
                 ("business_name", "business_site", "greeting", "tone",
                  "operator_chat_id", "managers")},
         kb=knowledge.stats(),
-        sheet_url=db.setting("sheets_kb_url", ""),
+        files=pricefile.files(),
         extra=db.setting("kb_extra", ""),
         script=db.script(),
         templates=db.SCRIPT_TEMPLATES,
@@ -917,11 +979,13 @@ async def setup_knowledge(request: Request):
     """Все три источника знаний прямо в мастере, без перехода на другую страницу."""
     form = await request.form()
 
-    sheet = str(form.get("sheet_url") or "").strip()
-    if sheet != db.setting("sheets_kb_url", ""):
-        db.set_setting("sheets_kb_url", sheet)
-        if sheet:
-            await asyncio.to_thread(sheets.sync_knowledge)
+    upload = form.get("file")
+    file_error = ""
+    if upload is not None and getattr(upload, "filename", ""):
+        try:
+            await asyncio.to_thread(pricefile.save, upload.filename, await upload.read())
+        except pricefile.PriceFileError as exc:
+            file_error = f"Файл не прочитан: {exc}"
 
     text = str(form.get("kb_extra") or "").strip()
     if text != db.setting("kb_extra", ""):
@@ -935,6 +999,9 @@ async def setup_knowledge(request: Request):
         await asyncio.to_thread(knowledge.fetch_pending)
 
     retrieval.invalidate()
+    if file_error:
+        return RedirectResponse("/setup?step=knowledge&error=" + quote(file_error),
+                                status_code=303)
     target = "knowledge" if form.get("stay") else "script"
     return RedirectResponse(f"/setup?step={target}", status_code=303)
 
@@ -952,7 +1019,12 @@ async def setup_script(template: str = Form(""), enable: str = Form("")):
 @app.post("/setup/launch")
 async def setup_launch(request: Request):
     form = await request.form()
-    key = str(form.get("openrouter_key") or "").strip()
+    raw_key = str(form.get("openrouter_key") or "")
+    key = _clean_key(raw_key)
+    if raw_key.strip() and not _key_looks_real(key):
+        return RedirectResponse(
+            "/setup?step=launch&error=" + quote("Ключ OpenRouter начинается на sk-or-. Проверьте, что скопировали именно его."),
+            status_code=303)
     if key:
         db.set_setting("openrouter_key", key)
     if form.get("model"):

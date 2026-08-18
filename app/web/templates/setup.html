@@ -90,14 +90,13 @@
       а позовёт менеджера. Это защита от выдумок про цены и сроки.
     </p>
 
-    <form method="post" action="/setup/knowledge">
+    <form method="post" action="/setup/knowledge" enctype="multipart/form-data">
       <div class="field">
-        <label>Google Таблица с прайсом и условиями</label>
-        <input type="text" name="sheet_url" value="{{ sheet_url }}"
-               placeholder="https://docs.google.com/spreadsheets/d/...">
+        <label>Прайс файлом — xlsx или csv</label>
+        <input type="file" name="file" accept=".xlsx,.csv,.tsv">
         <span class="note">
-          В таблице: Файл → Поделиться → Опубликовать в интернете. Ключи не нужны.
-          Правите таблицу — агент подхватывает изменения сам.
+          Первая строка — заголовки столбцов. Закупку, наценку и поставщика
+          агент не увидит. Поменяются цены — загрузите файл заново.
         </span>
       </div>
 
@@ -173,7 +172,7 @@
     <form method="post" action="/setup/launch">
       <div class="field">
         <label>Ключ OpenRouter — им агент думает</label>
-        <input type="password" name="openrouter_key" autocomplete="new-password"
+        <input type="password" name="openrouter_key" autocomplete="off" data-lpignore="true"
                placeholder="{% if ai_ready %}ключ сохранён — впишите новый, чтобы заменить{% else %}sk-or-v1-...{% endif %}">
         <span class="note">
           Регистрация на openrouter.ai → раздел Keys. Оплата за использование,

@@ -1,26 +1,19 @@
-"""Google Таблицы: база знаний на чтение и CRM на запись.
+"""Google Таблица для выгрузки лидов.
 
-Два направления работают независимо и по-разному, потому что и требования у
-них разные:
+Направление одно — лиды пишутся в таблицу. Для записи нужен сервисный аккаунт
+Google: JSON-ключ в GOOGLE_SA_FILE и таблица, расшаренная на его почту.
 
-  База знаний ← таблица.  Владелец жмёт «Опубликовать в интернете», отдаёт
-    ссылку на CSV. Ключи не нужны вообще. Минус: опубликованную таблицу видит
-    любой по ссылке — для прайса это нормально, для персональных данных нет.
+Прайс и другие таблицы знаний загружаются файлом (xlsx или csv) в разделе
+«База знаний» — см. pricefile.py. Читать их по опубликованной ссылке мы
+перестали: публикация открывает таблицу всему интернету, а закрытая таблица
+молча отдавала страницу входа Google вместо данных.
 
-  Лиды → таблица.  Тут нужна запись, а значит сервисный аккаунт Google:
-    JSON-ключ в GOOGLE_SA_FILE и таблица, расшаренная на его почту.
-
-Оба направления опциональны. Не настроено — модуль молчит, остальное работает.
+Выгрузка опциональна. Не настроено — модуль молчит, остальное работает.
 """
 from __future__ import annotations
 
-import csv
-import io
 import logging
-import re
-import urllib.error
 import urllib.parse
-import urllib.request
 
 import httpx
 
@@ -48,90 +41,6 @@ CRM_COLUMNS = [
     ("manager", "Менеджер"),
     ("dialog", "Диалог"),
 ]
-
-
-# ── база знаний из таблицы ─────────────────────────────────────────────
-
-def csv_url(link: str) -> str:
-    """Привести любую ссылку на таблицу к виду, отдающему CSV.
-
-    Понимает три формы: уже готовую ссылку /pub?output=csv, обычную ссылку
-    /edit и голый идентификатор таблицы.
-    """
-    link = (link or "").strip()
-    if not link:
-        return ""
-    if "output=csv" in link:
-        return link
-    if "/pub" in link:
-        joiner = "&" if "?" in link else "?"
-        return f"{link}{joiner}output=csv"
-
-    match = re.search(r"/spreadsheets/d/(?:e/)?([A-Za-z0-9_-]+)", link)
-    key = match.group(1) if match else link
-    gid = ""
-    gid_match = re.search(r"[#&?]gid=(\d+)", link)
-    if gid_match:
-        gid = f"&gid={gid_match.group(1)}"
-    return f"https://docs.google.com/spreadsheets/d/{key}/export?format=csv{gid}"
-
-
-def _fetch_csv(url: str) -> list[dict]:
-    request = urllib.request.Request(url, headers={"User-Agent": "AiSalesBot/1.0"})
-    with urllib.request.urlopen(request, timeout=config.CRAWL_TIMEOUT) as resp:
-        raw = resp.read(5_000_000).decode("utf-8", errors="replace")
-    return list(csv.DictReader(io.StringIO(raw)))
-
-
-def sync_knowledge() -> dict:
-    """Забрать таблицу и положить её в базу знаний одной страницей.
-
-    Каждая строка превращается в блок «Заголовок: значение». Это одинаково
-    хорошо работает и для таблицы «вопрос / ответ», и для прайса с десятком
-    столбцов — разбирать структуру заранее не нужно.
-    """
-    link = db.setting("sheets_kb_url", "").strip()
-    if not link:
-        return {"rows": 0, "skipped": "не настроено"}
-
-    try:
-        rows = _fetch_csv(csv_url(link))
-    except (urllib.error.URLError, urllib.error.HTTPError, OSError, ValueError) as exc:
-        log.warning("таблица базы знаний недоступна: %s", exc)
-        return {"rows": 0, "error": str(exc)}
-
-    blocks = []
-    for row in rows:
-        parts = [
-            f"{(header or '').strip()}: {str(value).strip()}"
-            for header, value in row.items()
-            if header and str(value or "").strip()
-        ]
-        if parts:
-            blocks.append("\n".join(parts))
-
-    text = "\n\n".join(blocks)
-    from . import knowledge, retrieval
-
-    existing = db.q1("SELECT id FROM kb_pages WHERE url = 'sheet://knowledge'")
-    if existing:
-        page_id = existing["id"]
-        db.run(
-            "UPDATE kb_pages SET text = ?, chars = ?, status = 'loaded', fetched_at = ?"
-            " WHERE id = ?",
-            (text, len(text), db.now(), page_id),
-        )
-    else:
-        page_id = db.run(
-            "INSERT INTO kb_pages (url, title, text, chars, included, status, fetched_at)"
-            " VALUES ('sheet://knowledge', 'Google Таблица', ?, ?, 1, 'loaded', ?)",
-            (text, len(text), db.now()),
-        )
-
-    knowledge._rechunk(page_id, text)
-    retrieval.invalidate()
-    log.info("база знаний из таблицы: %s строк, %s символов", len(blocks), len(text))
-    return {"rows": len(blocks), "chars": len(text)}
 
 
 # ── лиды в таблицу ─────────────────────────────────────────────────────
@@ -279,15 +188,7 @@ async def sync_leads() -> dict:
 
 async def check() -> dict:
     """Проверка настроек для страницы интеграций."""
-    result = {"kb": "не настроено", "crm": "не настроено"}
-
-    link = db.setting("sheets_kb_url", "").strip()
-    if link:
-        try:
-            rows = _fetch_csv(csv_url(link))
-            result["kb"] = f"ок, строк: {len(rows)}"
-        except Exception as exc:  # noqa: BLE001
-            result["kb"] = f"ошибка: {exc}"
+    result = {"crm": "не настроено"}
 
     if db.setting("sheets_crm_id", "").strip():
         if not config.GOOGLE_SA_FILE:

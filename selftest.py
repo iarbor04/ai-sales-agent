@@ -75,7 +75,8 @@ def main() -> int:
     routes = {r.path for r in app.routes if hasattr(r, "path")}
     expected = ["/", "/login", "/health", "/dialogs", "/requests", "/leads",
                 "/knowledge", "/broadcast", "/bots", "/script", "/settings",
-                "/onboarding", "/hook/whatsapp"]
+                "/settings/ai/check", "/knowledge/file", "/onboarding",
+                "/hook/whatsapp"]
     missing = [r for r in expected if r not in routes]
     check(f"маршруты на месте ({len(expected)} шт.)", not missing, ", ".join(missing))
 
@@ -116,7 +117,7 @@ def main() -> int:
     section("База знаний")
     page = db.run(
         "INSERT INTO kb_pages (url,title,text,chars,included,status,fetched_at)"
-        " VALUES ('t://p','Прайс',?,?,1,'loaded',?)",
+        " VALUES ('https://example.com/price','Прайс',?,?,1,'loaded',?)",
         ("Доставка по городу 500 рублей, срок один-два дня.", 48, db.now()))
     knowledge._rechunk(page, "Доставка по городу 500 рублей, срок один-два дня.")
     retrieval.invalidate()
@@ -202,6 +203,212 @@ def main() -> int:
               f"получателей {before}, записей {logged}")
 
     asyncio.run(behaviour())
+
+    section("Отказ модели объясняется")
+    import httpx
+
+    from app import llm
+
+    check("401 говорит про ключ",
+          "401" in llm._failure(401, "", "gpt") and "ключ" in llm._failure(401, "", "gpt").lower())
+    check("ответ OpenRouter попадает в текст",
+          "User not found" in llm._failure(401, "User not found", "gpt"))
+    check("402 говорит про счёт", "средств" in llm._failure(402, "", "gpt"))
+    check("404 называет модель", "«gpt»" in llm._failure(404, "", "gpt"))
+    check("429 говорит про частоту", "429" in llm._failure(429, "", "gpt"))
+    check("сообщение об ошибке читается из тела ответа",
+          llm._error_text(httpx.Response(401, json={"error": {"message": "User not found"}}))
+          == "User not found")
+
+    from app.web import main as web
+
+    check("пробелы и переносы в ключе убираются",
+          web._clean_key(" sk-or-v1-abc\n def ") == "sk-or-v1-abcdef")
+    check("пароль от панели не принимается за ключ", not web._key_looks_real("admin123"))
+    check("настоящий ключ проходит проверку",
+          web._key_looks_real("sk-or-v1-0123456789abcdef"))
+    check("сообщения из адреса выводятся на странице",
+          "query_params.get('error')" in (ROOT / "app/web/templates/base.html").read_text(encoding="utf-8"))
+
+    async def model_failures() -> None:
+        # ключ есть, но OpenRouter его не принимает — самый частый случай
+        db.set_setting("openrouter_key", "sk-or-v1-selftest-0000000000")
+        original = llm._call
+
+        async def refuse(system: str, user: str, max_tokens: int = 900) -> str:
+            raise llm.LLMError("OpenRouter отклонил ключ (401): User not found")
+
+        person = db.upsert_contact("tg", "903", "err", "Отказ", bot_id=bot_id)
+        llm._call = refuse
+        try:
+            await sales.handle_incoming(person["id"], "сколько стоит доставка?")
+        finally:
+            llm._call = original
+        row = db.q1("SELECT reason FROM requests WHERE contact_id = ? ORDER BY id DESC",
+                    (person["id"],))
+        check("причина отказа доходит до менеджера",
+              row is not None and "401" in (row["reason"] or ""),
+              f"в обращении: {row['reason'] if row else 'обращения нет'}")
+
+        async def junk(system: str, user: str, max_tokens: int = 900) -> str:
+            return "Здравствуйте! Отвечаю обычным текстом вместо JSON."
+
+        other = db.upsert_contact("tg", "904", "junk", "Мусор", bot_id=bot_id)
+        llm._call = junk
+        try:
+            await sales.handle_incoming(other["id"], "а рассрочка есть?")
+        finally:
+            llm._call = original
+        row = db.q1("SELECT reason FROM requests WHERE contact_id = ? ORDER BY id DESC",
+                    (other["id"],))
+        check("ответ не по формату отличается от отказа сети",
+              row is not None and "формат" in (row["reason"] or ""),
+              f"в обращении: {row['reason'] if row else 'обращения нет'}")
+
+        # слабая модель, которая с первого раза забыла про JSON, получает
+        # второй шанс — иначе диалог уходит человеку без причины
+        calls = []
+
+        async def second_try(system: str, user: str, max_tokens: int = 900) -> str:
+            calls.append(system)
+            if len(calls) == 1:
+                return "Конечно, расскажу!"
+            return '{"reply": "Панамы есть в наличии.", "handoff": false, "fields": {}}'
+
+        retry = db.upsert_contact("tg", "905", "retry", "Повтор", bot_id=bot_id)
+        llm._call = second_try
+        try:
+            result = await llm.answer(retry["id"], "панамы есть?")
+        finally:
+            llm._call = original
+        check("после ответа не по формату модель просят повторить",
+              len(calls) == 2 and llm.JSON_REMINDER in calls[1],
+              f"вызовов {len(calls)}")
+        check("со второй попытки ответ доходит до клиента",
+              result["reply"] == "Панамы есть в наличии." and not result["handoff"],
+              str(result))
+
+        # резюме не должно ронять передачу диалога
+        llm._call = refuse
+        try:
+            summary = await llm.summarize(person["id"])
+        finally:
+            llm._call = original
+        check("резюме при отказе модели не падает", summary == "")
+        db.set_setting("openrouter_key", "")
+
+    asyncio.run(model_failures())
+
+    section("Прайс файлом")
+    from app import pricefile as pricefile_mod
+
+    check("закупочная цена считается внутренним столбцом",
+          pricefile_mod.internal_column("Закупка, ₽"))
+    check("наценка считается внутренним столбцом",
+          pricefile_mod.internal_column("Наценка, %"))
+    check("розничная цена остаётся видимой",
+          not pricefile_mod.internal_column("Розница, ₽"))
+    check("название модели остаётся видимым",
+          not pricefile_mod.internal_column("Модель"))
+    check("оптовая цена скрывается", pricefile_mod.internal_column("Оптовая цена"))
+    check("похожее слово не прячет столбец зря",
+          not pricefile_mod.internal_column("Оптимальный размер"))
+
+    from app import pricefile
+
+    def make_xlsx(rows: list[list[str]]) -> bytes:
+        """Собрать xlsx так же, как это делает Excel: строки в sharedStrings."""
+        import io as _io
+        import zipfile as _zip
+        from xml.sax.saxutils import escape
+
+        strings, order = {}, []
+        for row in rows:
+            for value in row:
+                if value and not value.replace(".", "", 1).isdigit() and value not in strings:
+                    strings[value] = len(order)
+                    order.append(value)
+
+        body = []
+        for number, row in enumerate(rows, start=1):
+            cells = []
+            for position, value in enumerate(row):
+                if value == "":
+                    continue
+                ref = f"{chr(65 + position)}{number}"
+                if value in strings:
+                    cells.append(f'<c r="{ref}" t="s"><v>{strings[value]}</v></c>')
+                else:
+                    cells.append(f'<c r="{ref}"><v>{value}</v></c>')
+            body.append(f'<row r="{number}">{"".join(cells)}</row>')
+
+        ns = 'xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"'
+        rel_ns = 'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"'
+        buffer = _io.BytesIO()
+        with _zip.ZipFile(buffer, "w") as archive:
+            archive.writestr("xl/workbook.xml",
+                             f'<workbook {ns} {rel_ns}><sheets>'
+                             f'<sheet name="Прайс" sheetId="1" r:id="rId1"/></sheets></workbook>')
+            archive.writestr("xl/_rels/workbook.xml.rels",
+                             '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+                             '<Relationship Id="rId1" Target="worksheets/sheet1.xml"/></Relationships>')
+            archive.writestr("xl/sharedStrings.xml",
+                             f'<sst {ns}>' + "".join(f"<si><t>{escape(v)}</t></si>" for v in order) + "</sst>")
+            archive.writestr("xl/worksheets/sheet1.xml",
+                             f'<worksheet {ns}><sheetData>{"".join(body)}</sheetData></worksheet>')
+        return buffer.getvalue()
+
+    price = make_xlsx([
+        ["Модель", "Материал", "Розница, ₽", "Закупка, ₽"],
+        ["Панама «Havana»", "Соломка", "6720", "3200"],
+        ["Бини «Warm»", "", "1050", "350"],
+    ])
+    rows = pricefile.read_rows("прайс.xlsx", price)
+    check("xlsx читается без сторонних библиотек", len(rows) == 2, f"строк {len(rows)}")
+    check("цена не превращается в 6720.0",
+          rows[0].get("Розница, ₽") == "6720", str(rows[0]))
+    check("пустая ячейка не сдвигает столбцы",
+          rows[1].get("Розница, ₽") == "1050", str(rows[1]))
+
+    csv_rows = pricefile.read_rows("прайс.csv", "Модель;Розница\nКепка;1100\n".encode("cp1251"))
+    check("csv с точкой с запятой и кириллицей читается",
+          csv_rows and csv_rows[0].get("Розница") == "1100", str(csv_rows))
+
+    try:
+        pricefile.read_rows("прайс.xls", b"\xd0\xcf\x11\xe0")
+        old_format = "старый .xls принят"
+    except pricefile.PriceFileError as exc:
+        old_format = "" if "xlsx" in str(exc) else str(exc)
+    check("старый .xls объясняет, что делать", not old_format, old_format)
+
+    text, hidden = pricefile.rows_to_text(rows)
+    check("закупочная цена до модели не доходит", "3200" not in text and hidden == ["Закупка, ₽"])
+    check("розничная цена доходит до модели", "6720" in text)
+
+    saved = pricefile.save("прайс.xlsx", price)
+    stored = db.q1("SELECT text FROM kb_pages WHERE id = ?", (saved["page_id"],))["text"]
+    check("файл попадает в базу знаний", saved["rows"] == 2 and "6720" in stored)
+    check("файл виден в списке источников",
+          any(f["id"] == saved["page_id"] for f in pricefile.files()))
+    retrieval.invalidate()
+    check("агент находит товар из файла",
+          "Панама" in retrieval.context_for("есть панама?"))
+
+    try:
+        pricefile.save("прайс.xlsx", "это не таблица".encode("utf-8"))
+    except pricefile.PriceFileError:
+        pass
+    kept = db.q1("SELECT text FROM kb_pages WHERE id = ?", (saved["page_id"],))
+    check("битый файл не стирает прежний прайс", kept is not None and "6720" in kept["text"])
+
+    web_pages = db.q(f"SELECT url FROM kb_pages WHERE {knowledge.WEB_PAGES}")
+    check("обходчик сайта не трогает загруженный файл",
+          all(not row["url"].startswith("file://") for row in web_pages),
+          ", ".join(row["url"] for row in web_pages))
+
+    pricefile.remove(saved["page_id"])
+    check("файл убирается из базы знаний",
+          db.q1("SELECT id FROM kb_pages WHERE id = ?", (saved["page_id"],)) is None)
 
     section("Шаблоны и конструктор сценария")
     keys = list(db.SCRIPT_TEMPLATES)

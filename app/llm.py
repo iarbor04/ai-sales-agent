@@ -7,12 +7,14 @@
 
 Без ключа модуль не падает — он возвращает пустой результат с флагом
 handoff, и диалог уходит менеджеру. Это поведение из ТЗ: модель недоступна —
-передать разговор человеку.
+передать разговор человеку. Причина отказа при этом сохраняется дословно:
+менеджер должен видеть «OpenRouter отклонил ключ (401)», а не догадываться.
 """
 from __future__ import annotations
 
 import json
 import logging
+import time
 
 import httpx
 
@@ -22,6 +24,22 @@ log = logging.getLogger("llm")
 
 API_URL = "https://openrouter.ai/api/v1/chat/completions"
 MODELS_URL = "https://openrouter.ai/api/v1/models"
+KEY_URL = "https://openrouter.ai/api/v1/key"
+
+
+class LLMError(RuntimeError):
+    """Понятная причина, почему модель не ответила.
+
+    Текст этой ошибки уходит менеджеру в уведомление и в журнал обращений,
+    поэтому он написан для человека, а не для разработчика.
+    """
+
+# Напоминание для второй попытки: слабые модели забывают про формат.
+JSON_REMINDER = (
+    "\n\nВАЖНО: предыдущий ответ был отклонён, потому что это не JSON. "
+    "Верни ровно один JSON-объект по описанной схеме, без markdown, "
+    "без пояснений до и после."
+)
 
 # Ответ модели. Схему держим плоской — так модели ошибаются реже.
 ANSWER_SCHEMA = """{
@@ -80,12 +98,61 @@ async def available_models() -> list[dict]:
     return models
 
 
+def _error_text(resp: httpx.Response) -> str:
+    """Что именно ответил OpenRouter.
+
+    Одного кода состояния мало: 401 при отозванном ключе и 401 при ключе от
+    другого аккаунта выглядят одинаково, а сообщение провайдера их различает.
+    """
+    try:
+        body = resp.json()
+    except ValueError:
+        return resp.text.strip()[:200]
+    if isinstance(body, dict):
+        error = body.get("error")
+        if isinstance(error, dict) and error.get("message"):
+            return _tidy(str(error["message"]))
+        if isinstance(error, str):
+            return _tidy(error)
+    return _tidy(resp.text)
+
+
+def _tidy(detail: str) -> str:
+    """Без хвостовой точки: текст подставляется в середину предложения."""
+    return detail.strip().rstrip(".").strip()[:200]
+
+
+def _failure(status: int, detail: str, model: str) -> str:
+    detail = (detail or "").strip()
+    tail = f": {detail}" if detail else ""
+    if status == 401:
+        return f"OpenRouter отклонил ключ (401){tail or ': ключ недействителен или отозван'}"
+    if status == 402:
+        return f"на счёте OpenRouter нет средств (402){tail}"
+    if status == 403:
+        return f"OpenRouter запретил запрос (403){tail}"
+    if status == 404:
+        return f"модель «{model}» недоступна по этому ключу (404){tail}"
+    if status == 429:
+        return f"OpenRouter ограничил частоту запросов (429){tail}"
+    if status >= 500:
+        return f"OpenRouter временно недоступен ({status}){tail}"
+    return f"OpenRouter вернул ошибку {status}{tail}"
+
+
 async def _call(system: str, user: str, max_tokens: int = 900) -> str:
+    """Один запрос к модели. Ошибку не проглатывает, а объясняет.
+
+    Раньше любая неудача возвращала пустую строку, и владелец видел только
+    «модель недоступна» — по этой фразе нельзя отличить отозванный ключ от
+    пустого счёта или недоступной модели.
+    """
     key = api_key()
+    model = current_model()
     if not key:
-        return ""
+        raise LLMError("не задан ключ OpenRouter")
     payload = {
-        "model": current_model(),
+        "model": model,
         "max_tokens": max_tokens,
         "messages": [
             {"role": "system", "content": system},
@@ -102,11 +169,95 @@ async def _call(system: str, user: str, max_tokens: int = 900) -> str:
                 },
                 json=payload,
             )
-            resp.raise_for_status()
-            return (resp.json()["choices"][0]["message"]["content"] or "").strip()
-    except Exception as exc:  # noqa: BLE001
-        log.warning("модель недоступна: %s", exc)
-        return ""
+    except httpx.TimeoutException as exc:
+        raise LLMError("OpenRouter не ответил вовремя") from exc
+    except httpx.HTTPError as exc:
+        raise LLMError(f"не удалось связаться с OpenRouter: {exc}") from exc
+
+    if resp.status_code >= 400:
+        reason = _failure(resp.status_code, _error_text(resp), model)
+        log.error("запрос к модели не прошёл — %s", reason)
+        raise LLMError(reason)
+
+    try:
+        body = resp.json()
+    except ValueError as exc:
+        raise LLMError("OpenRouter вернул не-JSON") from exc
+
+    # OpenRouter умеет отвечать 200 с телом-ошибкой — это тоже отказ.
+    error = body.get("error") if isinstance(body, dict) else None
+    if error:
+        detail = error.get("message") if isinstance(error, dict) else str(error)
+        code = error.get("code") if isinstance(error, dict) else None
+        reason = _failure(int(code) if isinstance(code, int) else 400, str(detail or ""), model)
+        log.error("запрос к модели не прошёл — %s", reason)
+        raise LLMError(reason)
+
+    choices = body.get("choices") or []
+    if not choices:
+        raise LLMError(f"модель «{model}» вернула пустой ответ")
+    return (choices[0].get("message", {}).get("content") or "").strip()
+
+
+_key_cache: tuple[str, float, dict] | None = None
+KEY_CACHE_SECONDS = 120
+
+
+async def check_key(force: bool = False) -> dict:
+    """Проверка ключа там, где он действительно нужен.
+
+    Список моделей OpenRouter отдаёт публично, поэтому «модели загрузились»
+    не доказывает, что ключ рабочий. Этот эндпоинт без ключа не отвечает.
+
+    Результат держим пару минут: страница настроек открывается часто, а ключ
+    меняется редко. Кнопка проверки просит свежий ответ через force.
+    """
+    global _key_cache
+    key = api_key()
+    if not key:
+        return {"ok": False, "detail": "ключ не задан"}
+    now = time.monotonic()
+    if not force and _key_cache and _key_cache[0] == key and now - _key_cache[1] < KEY_CACHE_SECONDS:
+        return _key_cache[2]
+    result = await _probe_key(key)
+    _key_cache = (key, now, result)
+    return result
+
+
+async def _probe_key(key: str) -> dict:
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(KEY_URL, headers={"Authorization": f"Bearer {key}"})
+    except httpx.HTTPError as exc:
+        return {"ok": False, "detail": f"OpenRouter недоступен: {exc}"}
+
+    if resp.status_code >= 400:
+        return {"ok": False, "detail": _failure(resp.status_code, _error_text(resp), current_model())}
+
+    data = {}
+    try:
+        data = (resp.json() or {}).get("data") or {}
+    except ValueError:
+        pass
+    detail = "ключ принят OpenRouter"
+    limit, usage = data.get("limit"), data.get("usage")
+    if limit is not None:
+        detail += f", лимит {limit}, потрачено {usage or 0}"
+    elif usage is not None:
+        detail += f", потрачено {usage}"
+    return {"ok": True, "detail": detail}
+
+
+async def check_model() -> dict:
+    """Живой пробный запрос выбранной моделью — то же, что делает агент."""
+    model = current_model()
+    try:
+        reply = await _call("Ответь одним словом: ок.", "Проверка связи.", max_tokens=16)
+    except LLMError as exc:
+        return {"ok": False, "model": model, "detail": str(exc)}
+    if not reply:
+        return {"ok": False, "model": model, "detail": f"модель «{model}» вернула пустой ответ"}
+    return {"ok": True, "model": model, "detail": f"модель «{model}» ответила: {reply[:80]}"}
 
 
 def _parse(raw: str) -> dict | None:
@@ -228,6 +379,7 @@ async def answer(contact_id: int, question: str) -> dict:
         "summary": "",
     }
     if not ai_ready():
+        fallback["handoff_reason"] = "не задан ключ OpenRouter"
         return fallback
 
     context = retrieval.context_for(question)
@@ -254,13 +406,32 @@ async def answer(contact_id: int, question: str) -> dict:
 
     from . import booking as booking_mod
     system = _system_prompt() + _script_block(contact_id) + booking_mod.slots_for_prompt()
-    data = _parse(await _call(system, user))
+    try:
+        raw = await _call(system, user)
+    except LLMError as exc:
+        fallback["handoff_reason"] = str(exc)
+        return fallback
+
+    data = _parse(raw)
     if not data:
+        # Дешёвые модели часто отвечают обычным текстом вместо JSON. Одна
+        # повторная попытка с прямым напоминанием спасает такой диалог и стоит
+        # дешевле, чем потерянный клиент.
+        log.info("модель ответила не по формату, пробуем ещё раз")
+        try:
+            raw = await _call(system + JSON_REMINDER, user)
+        except LLMError as exc:
+            fallback["handoff_reason"] = str(exc)
+            return fallback
+        data = _parse(raw)
+    if not data:
+        fallback["handoff_reason"] = f"модель «{current_model()}» ответила не по формату"
         return fallback
 
     reply = str(data.get("reply") or "").strip()
     if not reply:
         # пустой ответ клиенту не отправляем никогда — лучше позвать человека
+        fallback["handoff_reason"] = f"модель «{current_model()}» вернула пустой ответ"
         return fallback
 
     fields = data.get("fields")
@@ -284,4 +455,9 @@ async def summarize(contact_id: int) -> str:
         "Сожми переписку в 1-2 предложения: что нужно клиенту и о чём договорились. "
         "Только факты из переписки, без выдумок. Верни голый текст без markdown."
     )
-    return await _call(system, _format_history(rows), max_tokens=200)
+    try:
+        return await _call(system, _format_history(rows), max_tokens=200)
+    except LLMError as exc:
+        # резюме — не главное: без него карточка лида просто уйдёт короче
+        log.warning("резюме не составлено: %s", exc)
+        return ""

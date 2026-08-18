@@ -135,6 +135,15 @@
   </aside>
 
   <main class="main">
+    {# Сообщения после действий приходят в адресе: ?error= или ?ok=.
+       Раньше их никто не выводил, и, например, ошибка токена бота
+       просто исчезала вместе с редиректом. #}
+    {% if request.query_params.get('error') %}
+    <div class="err">{{ request.query_params.get('error') }}</div>
+    {% endif %}
+    {% if request.query_params.get('ok') %}
+    <div class="done">{{ request.query_params.get('ok') }}</div>
+    {% endif %}
     {% block body %}{% endblock %}
   </main>
 </div>
