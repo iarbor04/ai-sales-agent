@@ -6,12 +6,11 @@
 <div class="card">
   <h2>Состояние подключений</h2>
   <table>
-    <tr><td>Telegram</td><td class="right">
-      {% if telegram_on %}<span class="pill ok">боты подключены</span>
-      {% else %}<span class="pill warn"><a href="/bots">добавьте бота</a></span>{% endif %}</td></tr>
-    <tr><td>WhatsApp Business</td><td class="right">
-      {% if whatsapp_on %}<span class="pill ok">подключён</span>
-      {% else %}<span class="pill off">не подключён</span>{% endif %}</td></tr>
+    {% for item in connections %}
+    <tr><td>{{ chan(item.code) }}</td><td class="right">
+      {% if item.on %}<span class="pill ok">подключён</span>
+      {% else %}<span class="pill off"><a href="{{ item.where }}">не подключён</a></span>{% endif %}</td></tr>
+    {% endfor %}
     <tr><td>Модель</td><td class="right">
       {% if not ai_ready %}<span class="pill warn">нет ключа — агент молчит и зовёт менеджера</span>
       {% elif key_check and key_check.ok %}<span class="pill ok">ключ работает — {{ key_source }}</span>
@@ -22,7 +21,20 @@
       клиентам и передаёт каждый диалог менеджеру.</td></tr>
     {% endif %}
     <tr><td>Режим приёма</td><td class="right"><span class="pill">{{ mode }}</span></td></tr>
+    <tr><td>Самопроверка<div class="small muted">служба проверяет себя раз в час</div></td>
+      <td class="right">
+        {% if not health.checked_at %}<span class="pill">ещё не запускалась</span>
+        {% elif health.problems %}<span class="pill bad">проблем: {{ health.problems | length }}</span>
+        {% else %}<span class="pill ok">всё работает</span>{% endif %}
+        <div class="small muted">{{ health.checked_at | dt if health.checked_at }}</div>
+      </td></tr>
+    {% for problem in health.problems or [] %}
+    <tr><td colspan="2" class="small" style="color:var(--danger)">— {{ problem }}</td></tr>
+    {% endfor %}
   </table>
+  <form method="post" action="/settings/health" style="margin-top:10px">
+    <button class="btn ghost small" type="submit">Проверить сейчас</button>
+  </form>
   {% if mode != 'webhook' and whatsapp_on %}
   <p class="muted small">WhatsApp работает только при MODE=webhook — Cloud API не умеет polling.</p>
   {% endif %}

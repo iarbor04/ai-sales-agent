@@ -27,8 +27,8 @@ from fastapi.templating import Jinja2Templates
 from itsdangerous import BadSignature, URLSafeSerializer
 
 from .. import (
-    autochain, booking, broadcast, config, db, knowledge, llm, onboarding,
-    pricefile, retrieval, rivals, sales, scheduler, sheets,
+    autochain, booking, broadcast, config, db, healthcheck, knowledge, llm,
+    onboarding, pricefile, retrieval, rivals, sales, scheduler, sheets,
 )
 from .. import channels
 from ..channels import base, telegram, whatsapp
@@ -661,8 +661,17 @@ async def settings_page(request: Request):
             "operator_chat_id", "managers", "handoff_note", "ai_enabled_global",
             "sheets_crm_id", "sheets_crm_tab"]
     values = {key: db.setting(key, "") for key in keys}
+    live = channels.active()
+    connections = [
+        {"code": code, "title": title, "on": code in live,
+         "where": "/bots" if code not in ("wa", "web") else
+                  ("/settings" if code == "wa" else "/widget")}
+        for code, title in config.CHANNEL_TITLES.items()
+    ]
     return page(request, "settings.html", values=values,
                 models=await llm.available_models(),
+                connections=connections,
+                health=healthcheck.last(),
                 telegram_on=channels.telegram_enabled(),
                 whatsapp_on=config.whatsapp_enabled(),
                 ai_ready=llm.ai_ready(),
@@ -670,6 +679,16 @@ async def settings_page(request: Request):
                 key_source=_key_source(),
                 sa_file=bool(config.GOOGLE_SA_FILE),
                 mode=config.MODE)
+
+
+@app.post("/settings/health")
+async def settings_health():
+    """Прогнать самопроверку прямо сейчас, не дожидаясь часа."""
+    state = await healthcheck.run()
+    note = ("Проверка пройдена, проблем нет" if not state["problems"]
+            else "Проверка нашла: " + "; ".join(state["problems"]))
+    return RedirectResponse("/settings?" + ("ok=" if not state["problems"] else "error=")
+                            + quote(note), status_code=303)
 
 
 @app.get("/settings/ai/check")

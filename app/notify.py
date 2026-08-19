@@ -103,6 +103,18 @@ async def booked(contact_id: int, slot: dict) -> None:
     )
 
 
+async def health_alert(problems: list[str]) -> None:
+    """Служба проверила себя и нашла поломку. Пишем один раз, а не каждый час."""
+    lines = ["⚠️ <b>Проверка сервиса нашла проблемы</b>"]
+    lines += [f"— {problem}" for problem in problems]
+    lines.append(f'<a href="{config.PUBLIC_URL}/settings">Открыть настройки</a>')
+    await _push("\n".join(lines))
+
+
+async def health_recovered() -> None:
+    await _push("✅ <b>Проверка сервиса: всё снова работает</b>")
+
+
 async def kb_pages_gone(count: int) -> None:
     """Страницы базы знаний перестали открываться — это дыра в ответах."""
     await _push(

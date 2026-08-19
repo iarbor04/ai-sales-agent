@@ -183,6 +183,46 @@ def main() -> int:
     db.set_setting("kb_refresh_hours", "0")
     check("ноль часов выключает перечитывание", not knowledge.refresh_due())
 
+    section("Самопроверка службы")
+
+    async def health() -> None:
+        from app import healthcheck
+        from app.web import main as web
+
+        state = await healthcheck.run()
+        problems = " | ".join(state["problems"])
+        check("пустая установка честно называет свои дыры",
+              any("бот" in p for p in state["problems"])
+              and any("ключ модели" in p for p in state["problems"]), problems)
+        check("результат сохраняется для панели",
+              healthcheck.last().get("problems") == state["problems"])
+
+        # уведомление уходит только при изменении набора проблем
+        alerts = []
+
+        async def fake_alert(items):
+            alerts.append(list(items))
+
+        original = healthcheck.notify.health_alert
+        healthcheck.notify.health_alert = fake_alert
+        db.set_setting(healthcheck.STATE_KEY, "")  # свежая установка: прошлого состояния нет
+        try:
+            await healthcheck.run_and_alert()
+            first = len(alerts)
+            await healthcheck.run_and_alert()
+            check("о поломке пишут один раз, а не каждый час",
+                  first == 1 and len(alerts) == 1, f"уведомлений {len(alerts)}")
+        finally:
+            healthcheck.notify.health_alert = original
+
+        check("в настройках перечислены все каналы, а не два",
+              "{% for item in connections %}" in
+              (ROOT / "app/web/templates/settings.html").read_text(encoding="utf-8"))
+        check("страница настроек знает про самопроверку",
+              "/settings/health" in {r.path for r in web.app.routes if hasattr(r, "path")})
+
+    asyncio.run(health())
+
     section("Сайт из настроек")
 
     async def site_reading() -> None:

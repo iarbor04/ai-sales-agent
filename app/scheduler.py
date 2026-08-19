@@ -8,17 +8,31 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from . import (autochain, booking, broadcast, config, db, knowledge, retrieval, rivals,
-                sheets)
+from . import (autochain, booking, broadcast, config, db, healthcheck, knowledge,
+                retrieval, rivals, sheets)
 
 log = logging.getLogger("scheduler")
 
 _task: asyncio.Task | None = None
 
 
+_last_health = 0
+HEALTH_EVERY = 3600
+
+
+async def _health() -> None:
+    """Самопроверка раз в час: о поломке владелец должен узнать не от клиента."""
+    global _last_health
+    if db.now() - _last_health < HEALTH_EVERY:
+        return
+    _last_health = db.now()
+    await healthcheck.run_and_alert()
+
+
 async def _tick() -> None:
     await broadcast.due()
     await autochain.process_due()
+    await _health()
     await _sync_sheets()
     await _watch_rivals()
     await _refresh_knowledge()
