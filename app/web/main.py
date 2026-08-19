@@ -615,6 +615,7 @@ async def agent_page(request: Request):
     steps = db.script()
     kb = knowledge.stats()
     return page(request, "agent.html",
+                checklist=onboarding.progress(),
                 prompt=llm.prompt_preview(),
                 agent_role=db.setting("agent_role", ""),
                 reply_length=db.setting("reply_length", "short"),

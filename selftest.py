@@ -104,26 +104,34 @@ def main() -> int:
     check("раздел агента идёт до рабочих разделов",
           base_html.index('href="/agent"') < base_html.index('href="/leads"'))
     check("меню разбито на группы с подписями", base_html.count('class="navgroup"') >= 4)
-    for part in ("Мозг", "Чем отвечает", "Где говорит", "Как ведёт разговор", "Кому передаёт"):
-        check(f"страница агента отвечает на «{part}»", part in agent_html)
-    check("страница агента предупреждает про пустую фразу передачи",
-          "клиент получит тишину" in agent_html)
-    check("промпт и шаблоны видно в панели",
-          "Промпт целиком" in agent_html and "Шаблоны сценария" in agent_html)
-    check("новичок настраивает агента полями, а не промптом",
-          agent_html.index("Как агент разговаривает") < agent_html.index("Промпт целиком")
-          and "Когда звать менеджера" in agent_html)
+    check("первый экран отвечает: работает или нет",
+          "Агент работает и отвечает клиентам" in agent_html
+          and "Агент ещё не отвечает клиентам" in agent_html)
+    check("на первом экране один следующий шаг",
+          "Дальше: {{ checklist.next.title | lower }}" in agent_html)
+    check("страница показывает чек-лист готовности",
+          "Что нужно агенту для работы" in agent_html and "checklist.steps" in agent_html)
+    check("у невыполненного шага видно, что делать",
+          "step.how" in agent_html and "step.action" in agent_html)
+    check("страница предупреждает про пустую фразу передачи",
+          "разговор для него" in agent_html and "просто оборвётся" in agent_html)
+    check("сложное спрятано под «для тех, кто хочет глубже»",
+          "Для тех, кто хочет глубже" in agent_html
+          and "Показать инструкцию, которую получает ИИ" in agent_html)
+    check("новичок настраивает агента полями, а не текстом промпта",
+          agent_html.index("Как он разговаривает") < agent_html.index("Для тех, кто хочет глубже")
+          and "Когда звать живого менеджера" in agent_html)
     check("шаблоны сценариев вставляются кнопками",
-          'class="chip" data-snippet' in agent_html and "Вставить шаблон сценария" in agent_html)
-    check("подстановки тоже вставляются кнопкой, а не переписыванием",
-          'class="chip mono" data-snippet' in agent_html)
+          'class="chip" data-snippet' in agent_html and "Готовые сценарии" in agent_html)
+    check("данные подставляются кнопкой с понятной подписью, а не кодом",
+          "Подставить данные" in agent_html and "название компании" in agent_html)
     check("шаблон превращается в текст для промпта",
           "Веди разговор по шагам" in db.template_prompt("shop")
           and "Знакомство" in db.template_prompt("shop"))
     check("у несуществующего шаблона пустой текст, а не падение",
           db.template_prompt("нет-такого") == "")
-    check("сырой промпт спрятан под раскрытие",
-          "<details" in agent_html.split("Промпт целиком")[1].split("</form>")[0])
+    check("сырой текст промпта спрятан под раскрытие",
+          "<details" in agent_html.split("Для тех, кто хочет глубже")[1].split("</form>")[0])
 
     # свои правила должны попадать в промпт, но не ломать контракт
     db.set_setting("business_name", "BlackHat")
@@ -161,7 +169,7 @@ def main() -> int:
     db.set_setting("reply_length", "short")
     db.set_setting("handoff_reasons", llm_mod.DEFAULT_HANDOFF)
 
-    check("страница даёт править промпт целиком",
+    check("промпт всё ещё можно переписать целиком",
           'action="/agent/prompt/template"' in agent_html and "Вернуть стандартный" in agent_html)
 
     check("без своих правил промпт остаётся целым",

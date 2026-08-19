@@ -1,159 +1,74 @@
 {% extends "base.html" %}
 {% block title %}Агент · ИИ-продажник{% endblock %}
 {% block body %}
-<div class="topbar">
-  <div style="flex:1">
-    <h1>{{ business or 'Ваш ИИ-продажник' }}</h1>
-    <p class="sub">Это он и отвечает клиентам в мессенджерах. Здесь видно, из чего
-      он состоит и чего ему не хватает.</p>
+
+{# Первый экран отвечает на единственный вопрос новичка: работает или нет,
+   и что нажать прямо сейчас. Всё остальное — ниже и свёрнуто. #}
+<section class="hero {{ 'live' if checklist.ready else 'setup' }}">
+  <div class="hero-main">
+    <span class="hero-eyebrow">{{ business or 'Ваш бизнес' }}</span>
+    <h1>
+      {% if checklist.ready %}Агент работает и отвечает клиентам
+      {% else %}Агент ещё не отвечает клиентам{% endif %}
+    </h1>
+    <p>
+      {% if checklist.ready %}
+        Он разговаривает с людьми в мессенджерах, собирает заявки и зовёт вас,
+        когда нужен человек.
+      {% else %}
+        Осталось {{ checklist.total - checklist.done }} из {{ checklist.total }}:
+        без этого он будет молчать и передавать каждый разговор менеджеру.
+      {% endif %}
+    </p>
+    {% if checklist.next %}
+    <a class="btn large" href="{{ checklist.next.link }}">
+      Дальше: {{ checklist.next.title | lower }} →
+    </a>
+    {% else %}
+    <a class="btn large" href="/dialogs">Смотреть диалоги →</a>
+    {% endif %}
   </div>
-  {% if ai_on and key_ready and key_check.ok and live_channels %}
-  <span class="pill ok">агент на связи</span>
-  {% else %}
-  <span class="pill warn">агент ещё не отвечает</span>
-  {% endif %}
+  <div class="hero-side">
+    <div class="hero-ring" style="--done: {{ (checklist.done / checklist.total * 100) | round }}">
+      <b>{{ checklist.done }}/{{ checklist.total }}</b>
+      <span>готово</span>
+    </div>
+  </div>
+</section>
+
+<h2 class="section-title">Что нужно агенту для работы</h2>
+<div class="steps">
+  {% for step in checklist.steps %}
+  <article class="step-row {{ 'done' if step.done }}">
+    <div class="step-mark">{{ '✓' if step.done else loop.index }}</div>
+    <div class="step-text">
+      <b>{{ step.title }}{% if step.optional %} <span class="hint">по желанию</span>{% endif %}</b>
+      <p>{{ step.why }}</p>
+      {% if not step.done %}<p class="step-how">{{ step.how }}</p>{% endif %}
+    </div>
+    <div class="step-state">
+      <span class="pill {{ 'ok' if step.done else 'warn' }}">{{ step.state }}</span>
+      <a class="btn ghost small" href="{{ step.link }}">{{ 'Изменить' if step.done else step.action }}</a>
+    </div>
+  </article>
+  {% endfor %}
 </div>
 
-<div class="grid c4">
-  <div class="stat">
-    <div class="n">{{ live_channels | length }}</div>
-    <div class="l">каналов на связи</div>
-  </div>
-  <div class="stat">
-    <div class="n">{{ kb.chunks }}</div>
-    <div class="l">фрагментов знаний</div>
-  </div>
-  <div class="stat">
-    <div class="n">{{ steps | length if script_bots else '—' }}</div>
-    <div class="l">шагов сценария</div>
-  </div>
-  <div class="stat">
-    <div class="n">{{ sales_bots | length }}</div>
-    <div class="l">ботов-продавцов</div>
-  </div>
-</div>
-
+<h2 class="section-title">Как он разговаривает</h2>
 <div class="card">
-  <h2>Из чего он собран</h2>
-  <table>
-    <tr>
-      <td style="width:190px">Мозг</td>
-      <td>
-        {% if not key_ready %}
-        <span class="pill warn">доступ не настроен</span>
-        <span class="muted small">Без него агент молчит и зовёт менеджера.</span>
-        {% elif key_check.ok %}
-        <span class="pill ok">{{ provider_title }}</span>
-        <span class="muted small">модель <code>{{ model }}</code></span>
-        {% else %}
-        <span class="pill bad">{{ provider_title }} не принял доступ</span>
-        <span class="small" style="color:var(--danger)">{{ key_check.detail }}</span>
-        {% endif %}
-      </td>
-      <td class="right"><a class="btn ghost small" href="/settings">Настроить</a></td>
-    </tr>
-    <tr>
-      <td>Чем отвечает</td>
-      <td>
-        {% if kb.chunks %}
-        <span class="pill ok">{{ kb.loaded }} источников</span>
-        <span class="muted small">прайс, документы, страницы сайта</span>
-        {% else %}
-        <span class="pill warn">база знаний пуста</span>
-        <span class="muted small">агент не сможет назвать ни цену, ни условия.</span>
-        {% endif %}
-      </td>
-      <td class="right"><a class="btn ghost small" href="/knowledge">Наполнить</a></td>
-    </tr>
-    <tr>
-      <td>Где говорит</td>
-      <td>
-        {% if live_channels %}
-        {% for code in live_channels %}{{ chan(code) }}{% endfor %}
-        {% else %}
-        <span class="pill warn">каналов нет</span>
-        <span class="muted small">клиентам некуда написать.</span>
-        {% endif %}
-      </td>
-      <td class="right"><a class="btn ghost small" href="/bots">Подключить</a></td>
-    </tr>
-    <tr>
-      <td>Как ведёт разговор</td>
-      <td>
-        {% if script_bots %}
-        <span class="pill ok">по сценарию, {{ steps | length }} шагов</span>
-        {% else %}
-        <span class="pill">свободно по базе знаний</span>
-        <span class="muted small">сценарий выключен — отвечает по вопросу клиента.</span>
-        {% endif %}
-        {% if tone %}<span class="muted small">тон: {{ tone }}</span>{% endif %}
-      </td>
-      <td class="right"><a class="btn ghost small" href="/script">Сценарий</a></td>
-    </tr>
-    <tr>
-      <td>Кому передаёт</td>
-      <td>
-        {% if managers %}<span class="pill ok">{{ managers }}</span>
-        {% else %}<span class="pill warn">ответственные не заданы</span>{% endif %}
-        {% if not operator_chat %}
-        <span class="small" style="color:var(--danger)">чат для уведомлений не задан — менеджер не узнает о передаче</span>
-        {% endif %}
-        {% if not handoff_note.strip() %}
-        <span class="small" style="color:var(--danger)">фраза при передаче пустая — клиент получит тишину</span>
-        {% endif %}
-      </td>
-      <td class="right"><a class="btn ghost small" href="/settings">Менеджеры</a></td>
-    </tr>
-    <tr>
-      <td>Общий выключатель</td>
-      <td>
-        {% if ai_on %}<span class="pill ok">ИИ отвечает клиентам</span>
-        {% else %}<span class="pill off">ИИ выключен — все диалоги идут менеджеру</span>{% endif %}
-      </td>
-      <td class="right"><a class="btn ghost small" href="/settings">Изменить</a></td>
-    </tr>
-  </table>
-</div>
-
-{% if sales_bots %}
-<div class="card">
-  <h2>Кто продаёт <span class="hint">боты с ролью «продажник»</span></h2>
-  <table>
-    <tr><th>Бот</th><th>Канал</th><th style="width:140px">Состояние</th><th style="width:110px"></th></tr>
-    {% for b in sales_bots %}
-    <tr>
-      <td>{{ b.title }}{% if b.username %} <span class="muted small">@{{ b.username }}</span>{% endif %}</td>
-      <td>{{ chan(b.platform) }}</td>
-      <td>
-        {% if b.id in live %}<span class="pill ok">на связи</span>
-        {% elif not b.enabled %}<span class="pill off">выключен</span>
-        {% else %}<span class="pill warn">не поднялся</span>{% endif %}
-      </td>
-      <td class="right"><a class="btn ghost small" href="/bots">Настроить</a></td>
-    </tr>
-    {% endfor %}
-  </table>
-</div>
-{% endif %}
-
-<div class="card">
-  <h2>Как агент разговаривает</h2>
-  <p class="lead-text">
-    Это и есть его характер. Заполните понятными словами — промпт для модели
-    соберётся сам.
-  </p>
+  <p class="lead-text">Заполните обычными словами — инструкция для ИИ соберётся сама.</p>
   <form method="post" action="/agent/prompt">
     <div class="row">
       <div class="field">
         <label>Кто он для клиента</label>
         <input type="text" name="agent_role" value="{{ agent_role }}"
                placeholder="продавец-консультант" maxlength="120">
-        <span class="note">Например: консультант по головным уборам, менеджер отдела продаж.</span>
+        <span class="note">Например: консультант по головным уборам.</span>
       </div>
       <div class="field">
-        <label>Тон общения</label>
+        <label>Как разговаривает</label>
         <input type="text" name="tone" value="{{ tone }}" list="tone-presets"
-               placeholder="дружелюбный, короткий, по делу" maxlength="120">
+               placeholder="дружелюбно, коротко, по делу" maxlength="120">
         <datalist id="tone-presets">
           {% for preset in tone_presets %}<option value="{{ preset }}"></option>{% endfor %}
         </datalist>
@@ -169,53 +84,77 @@
     </div>
 
     <div class="field">
-      <label>Когда звать менеджера</label>
-      {% for key, text in handoff_reasons.items() %}
-      <label class="check">
-        <input type="checkbox" name="handoff_{{ key }}" {{ 'checked' if key in handoff_on }}
-               {{ 'disabled checked' if key == 'human' }}>
-        <span>{{ text }}</span>
-      </label>
-      {% endfor %}
-      <span class="note">Просьбу позвать человека выключить нельзя: иначе клиент
-        останется с ботом навсегда.</span>
+      <label>Когда звать живого менеджера</label>
+      <div class="checks">
+        {% for key, text in handoff_reasons.items() %}
+        <label class="check">
+          <input type="checkbox" name="handoff_{{ key }}" {{ 'checked' if key in handoff_on }}
+                 {{ 'disabled checked' if key == 'human' }}>
+          <span>{{ text }}{% if key == 'human' %} <span class="hint">всегда</span>{% endif %}</span>
+        </label>
+        {% endfor %}
+      </div>
+      {% if not handoff_note.strip() %}
+      <span class="note" style="color:var(--danger)">
+        Сейчас в момент передачи клиент не получит ничего — разговор для него
+        просто оборвётся. Впишите фразу в
+        <a href="/settings">Настройках</a>, например «Передаю вас менеджеру, он ответит здесь же».
+      </span>
+      {% endif %}
     </div>
 
     <div class="field">
-      <label>Что важно именно в вашем бизнесе</label>
-      <textarea name="prompt_extra" style="min-height:110px"
-        placeholder="Скидки не обещаем — их согласовывает менеджер.&#10;Всегда предлагаем доставку и называем срок.&#10;Про сроки под заказ говорим «уточню у менеджера».">{{ prompt_extra }}</textarea>
-      <span class="note">По одному правилу в строке. Это указания модели: она их
-        учитывает, но не выполняет как программу — самое важное лучше писать первым.</span>
+      <label>Что важно именно в вашем деле</label>
+      <textarea name="prompt_extra" style="min-height:100px"
+        placeholder="Скидки не обещаем — их согласовывает менеджер.&#10;Всегда предлагаем доставку и называем срок.">{{ prompt_extra }}</textarea>
+      <span class="note">По одному правилу в строке. Самое важное пишите первым:
+        это указания для ИИ, он их учитывает, но не выполняет как программу.</span>
     </div>
 
     <button class="btn" type="submit">Сохранить</button>
   </form>
 </div>
 
+{% if sales_bots %}
+<h2 class="section-title">Кто разговаривает с клиентами</h2>
 <div class="card">
-  <h2>Промпт целиком
-    <span class="hint">{{ 'изменён вручную' if prompt_is_custom else 'для продвинутых' }}</span></h2>
-  <p class="lead-text">
-    Обычно сюда заходить не нужно: всё, что выше, и есть промпт, только словами.
-    Открывайте, если хотите переписать инструкцию модели сами.
-  </p>
+  <table>
+    {% for b in sales_bots %}
+    <tr>
+      <td><b>{{ b.title }}</b>{% if b.username %} <span class="muted small">@{{ b.username }}</span>{% endif %}</td>
+      <td style="width:150px">{{ chan(b.platform) }}</td>
+      <td style="width:130px">
+        {% if b.id in live %}<span class="pill ok">на связи</span>
+        {% elif not b.enabled %}<span class="pill off">выключен</span>
+        {% else %}<span class="pill warn">не поднялся</span>{% endif %}
+      </td>
+      <td class="right" style="width:110px"><a class="btn ghost small" href="/bots">Настроить</a></td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+{% endif %}
 
+<h2 class="section-title">Для тех, кто хочет глубже</h2>
+<div class="card">
   <details class="prompt-editor" {{ 'open' if prompt_is_custom }}>
     <summary class="btn ghost small">
-      {{ 'Промпт изменён вручную — открыть' if prompt_is_custom else 'Редактировать промпт' }}
+      {{ 'Инструкция для ИИ изменена вручную — открыть' if prompt_is_custom
+         else 'Показать инструкцию, которую получает ИИ' }}
     </summary>
 
+    <p class="lead-text" style="margin-top:14px">
+      Всё, что вы заполнили выше, превращается вот в этот текст. Его можно
+      переписать целиком — тогда поля выше перестанут на него влиять.
+    </p>
+
     {% if prompt_is_custom %}
-    <div class="callout">
-      Промпт заменён вручную, поэтому поля выше на него больше не влияют — кроме
-      подстановок, которые вы оставили в тексте.
-    </div>
+    <div class="callout">Сейчас используется ваш текст, а не собранный из полей.</div>
     {% endif %}
 
     <form method="post" action="/agent/prompt/template">
       <div class="prompt-tools">
-        <span class="prompt-tools-label">Вставить шаблон сценария:</span>
+        <span class="prompt-tools-label">Готовые сценарии — вставить в текст:</span>
         {% for item in templates_list %}
         <button type="button" class="chip" data-snippet="{{ item.prompt }}"
                 title="{{ item.steps | join(' → ') }}">{{ item.title }}</button>
@@ -225,35 +164,33 @@
       <textarea name="prompt_template" id="prompt-template" spellcheck="false">{{ prompt_template }}</textarea>
 
       <div class="prompt-tools">
-        <span class="prompt-tools-label">Подстановки:</span>
-        {% for mark, what in [('{role}', 'кто он'), ('{business}', 'компания'),
-                              ('{tone}', 'тон'), ('{length}', 'длина ответа'),
-                              ('{handoff}', 'когда звать менеджера'), ('{stages}', 'этапы'),
+        <span class="prompt-tools-label">Подставить данные:</span>
+        {% for mark, what in [('{business}', 'название компании'), ('{role}', 'кто он'),
+                              ('{tone}', 'как разговаривает'), ('{length}', 'длина ответа'),
+                              ('{handoff}', 'когда звать менеджера'), ('{stages}', 'этапы воронки'),
                               ('{rules}', 'ваши правила'), ('{schema}', 'форма ответа')] %}
-        <button type="button" class="chip mono" data-snippet="{{ mark }}"
-                title="{{ what }}">{{ mark }}</button>
+        <button type="button" class="chip" data-snippet="{{ mark }}">{{ what }}</button>
         {% endfor %}
       </div>
 
       <p class="note">
-        Кнопки вставляют текст туда, где стоит курсор. Уберёте
-        <code>{{ '{schema}' }}</code> — форму ответа допишу сам: без неё модель
-        отвечает свободным текстом и клиент остаётся без ответа. После сохранения
-        сразу проверю промпт живым запросом.
+        Кнопки вставляют текст туда, где стоит курсор. «Форму ответа» убирать не
+        стоит — без неё ИИ отвечает свободным текстом и клиент не получает ничего;
+        если уберёте, допишу сам. После сохранения сразу проверю живым запросом.
       </p>
 
       <div class="row between">
         <button class="btn ghost small" type="submit" name="restore" value="1"
-                onclick="return confirm('Вернуть стандартный промпт? Ваши правки пропадут.')">
+                onclick="return confirm('Вернуть стандартный текст? Ваши правки пропадут.')">
           Вернуть стандартный</button>
         <button class="btn" type="submit">Сохранить и проверить</button>
       </div>
     </form>
 
-    <details style="margin-top:14px">
-      <summary class="small">Что уходит в модель после подстановок ({{ prompt | length }} символов)</summary>
+    <details style="margin-top:16px">
+      <summary class="small">Показать текст целиком, как его увидит ИИ ({{ prompt | length }} символов)</summary>
       <p class="muted small" style="margin:8px 0">
-        Плюс к этому в каждом запросе идут база знаний по вопросу клиента и
+        К нему в каждом запросе добавляются подходящие куски базы знаний и
         последние сообщения переписки.
       </p>
       <pre class="dump prompt-preview">{{ prompt }}</pre>
@@ -261,9 +198,16 @@
   </details>
 </div>
 
+{% if health.problems %}
+<div class="card warn">
+  <h2>Проверка нашла проблемы</h2>
+  <ul class="small" style="margin:0;padding-left:18px">
+    {% for problem in health.problems %}<li>{{ problem }}</li>{% endfor %}
+  </ul>
+</div>
+{% endif %}
+
 <script>
-// Кнопки вставляют текст в позицию курсора: владелец собирает промпт из блоков,
-// а не переписывает его целиком.
 (() => {
   const area = document.getElementById('prompt-template');
   if (!area) return;
@@ -272,7 +216,7 @@
       const snippet = chip.dataset.snippet;
       const start = area.selectionStart ?? area.value.length;
       const end = area.selectionEnd ?? area.value.length;
-      const block = chip.classList.contains('mono') ? snippet : `\n\n${snippet}\n`;
+      const block = snippet.startsWith('{') ? snippet : `\n\n${snippet}\n`;
       area.setRangeText(block, start, end, 'end');
       area.focus();
       chip.classList.add('used');
@@ -281,57 +225,4 @@
   });
 })();
 </script>
-
-<div class="card">
-  <h2>Шаблоны сценария <span class="hint">готовые наборы шагов</span></h2>
-  <p class="lead-text">
-    Те же шаблоны кнопками вставляются в промпт выше. А если включить их в
-    разделе <a href="/script">Сценарий</a>, агент будет вести клиента по шагам
-    и отмечать, какой шаг пройден.
-  </p>
-  <table>
-    <tr><th style="width:170px">Шаблон</th><th>Шаги</th></tr>
-    {% for item in templates_list %}
-    <tr>
-      <td><b>{{ item.title }}</b>{% if item.hint %}<div class="small dim">{{ item.hint }}</div>{% endif %}</td>
-      <td class="small">{{ item.steps | join(' → ') }}</td>
-    </tr>
-    {% endfor %}
-  </table>
-  <p class="muted small" style="margin:10px 0 0">
-    Тексты рассылок и шагов автоцепочек — отдельно, в разделах
-    <a href="/broadcast">Рассылки</a> и <a href="/autochains">Автоцепочки</a>:
-    там они мультиязычные и с кнопками.
-  </p>
-</div>
-
-<div class="card">
-  <h2>Как он себя ведёт</h2>
-  <p class="lead-text" style="margin-bottom:10px">
-    Отвечает коротко и задаёт не больше одного вопроса за сообщение. Говорит
-    только по загруженной информации: цены, сроки и условия не выдумывает.
-    Постепенно собирает имя, контакт, что нужно и к какому сроку — карточка лида
-    заводится сама.
-  </p>
-  <div class="callout">
-    <b>Зовёт человека</b>, когда клиент просит менеджера, готов покупать,
-    жалуется, просит особые условия или задаёт вопрос, ответа на который нет
-    в базе знаний. Тогда ИИ замолкает, приходит уведомление, а в карточке
-    остаётся резюме разговора.
-  </div>
-  {% if greeting %}
-  <p class="muted small" style="margin-top:10px">Приветствие на /start: «{{ greeting }}»</p>
-  {% endif %}
-</div>
-
-{% if health.problems %}
-<div class="card warn">
-  <h2>Самопроверка нашла проблемы</h2>
-  <ul class="small" style="margin:0;padding-left:18px">
-    {% for problem in health.problems %}<li>{{ problem }}</li>{% endfor %}
-  </ul>
-  <p class="muted small" style="margin:10px 0 0">Проверка идёт раз в час,
-    подробности и кнопка «Проверить сейчас» — в <a href="/settings">Настройках</a>.</p>
-</div>
-{% endif %}
 {% endblock %}

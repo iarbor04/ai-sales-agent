@@ -494,8 +494,6 @@ label { display: block; font-size: 12.5px; color: var(--text-2); margin-bottom: 
 .chain-step textarea { min-height: 90px; }
 .navgroup { margin: 14px 10px 6px; color: var(--text-3); font-size: 9.5px; font-weight: 700; letter-spacing: .9px; text-transform: uppercase; }
 .side.narrow .navgroup, .navgroup:empty { display: none; }
-.prompt-editor > summary { display: inline-flex; width: auto; margin-bottom: 12px; cursor: pointer; }
-.prompt-editor > summary::-webkit-details-marker { display: none; }
 .prompt-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 10px 0; }
 .prompt-tools-label { color: var(--text-3); font-size: 11px; margin-right: 2px; }
 .chip { padding: 5px 11px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); color: var(--text-2); font: inherit; font-size: 12px; cursor: pointer; }
@@ -504,6 +502,44 @@ label { display: block; font-size: 12.5px; color: var(--text-2); margin-bottom: 
 .chip.mono { font-family: var(--mono, ui-monospace, monospace); font-size: 11px; }
 #prompt-template { width: 100%; min-height: 320px; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius-sm); font-family: var(--mono, ui-monospace, monospace); font-size: 12px; line-height: 1.55; resize: vertical; }
 .prompt-preview { max-height: 320px; overflow: auto; white-space: pre-wrap; }
+/* ── страница агента ───────────────────────────────────────────────────
+   Первый экран отвечает новичку на один вопрос: работает или нет и что нажать.
+   Поэтому статус крупный, шаг один, всё остальное ниже и мельче. */
+.hero { display: flex; align-items: center; gap: 28px; padding: 30px 32px; margin-bottom: 26px;
+  border-radius: 16px; background: linear-gradient(135deg, #0d3b26 0%, #0a7c47 100%); color: #fff;
+  box-shadow: 0 18px 40px -22px rgba(10, 124, 71, .8); }
+.hero.setup { background: linear-gradient(135deg, #2b2f36 0%, #4b5563 100%);
+  box-shadow: 0 18px 40px -22px rgba(43, 47, 54, .7); }
+.hero-main { flex: 1; min-width: 0; }
+.hero-eyebrow { display: block; font-size: 11px; letter-spacing: 1.1px; text-transform: uppercase;
+  opacity: .72; margin-bottom: 8px; }
+.hero h1 { margin: 0 0 8px; font-size: 27px; line-height: 1.2; letter-spacing: -.4px; }
+.hero p { margin: 0 0 18px; max-width: 62ch; font-size: 14px; line-height: 1.55; opacity: .88; }
+.hero .btn.large { padding: 12px 22px; font-size: 14px; background: #fff; color: #0d3b26; border: 0; }
+.hero .btn.large:hover { background: #f2f4f7; }
+.hero-side { flex: 0 0 auto; }
+.hero-ring { display: grid; place-content: center; width: 116px; height: 116px; border-radius: 50%;
+  background: conic-gradient(#fff calc(var(--done) * 1%), rgba(255,255,255,.22) 0); text-align: center; }
+.hero-ring::before { content: ""; position: absolute; width: 92px; height: 92px; border-radius: 50%;
+  background: inherit; }
+.hero-ring b { position: relative; display: block; width: 92px; height: 92px; border-radius: 50%;
+  display: grid; place-content: center; background: rgba(0,0,0,.24); font-size: 21px; }
+.hero-ring span { position: absolute; margin-top: 62px; margin-left: 8px; font-size: 10px; opacity: .8; }
+
+.steps { display: flex; flex-direction: column; gap: 10px; margin-bottom: 26px; }
+.step-row { display: grid; grid-template-columns: 34px 1fr auto; align-items: start; gap: 16px;
+  padding: 16px 18px; border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--surface); box-shadow: var(--shadow-sm); }
+.step-row.done { background: var(--surface-2); border-color: var(--border-soft); }
+.step-mark { display: grid; place-content: center; width: 26px; height: 26px; border-radius: 50%;
+  background: var(--surface-2); color: var(--text-3); font-size: 12px; font-weight: 700; }
+.step-row.done .step-mark { background: var(--brand-soft); color: var(--brand-text); }
+.step-text b { font-size: 14px; }
+.step-text p { margin: 5px 0 0; color: var(--text-2); font-size: 13px; line-height: 1.5; }
+.step-text .step-how { color: var(--text-3); font-size: 12.5px; }
+.step-state { display: flex; align-items: center; gap: 10px; white-space: nowrap; }
+
+.checks { display: flex; flex-direction: column; gap: 7px; }
 @media (max-width: 1000px) {
   .side { width: 62px; flex-basis: 62px; padding: 16px 8px; }
   .side .brand .logo, .side .brand .product,
