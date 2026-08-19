@@ -76,7 +76,9 @@ def active_channels() -> list[str]:
 # ── модель ─────────────────────────────────────────────────────────────
 OPENROUTER_API_KEY = _env("OPENROUTER_API_KEY")
 # Модель по умолчанию; владелец меняет её в Настройках из списка доступных.
-OPENROUTER_MODEL = _env("OPENROUTER_MODEL", "openai/gpt-4o-mini")
+# Дешёвая и быстрая модель по умолчанию: на ней проверялись ответы агента.
+# Владелец меняет её в Настройках из списка доступных.
+OPENROUTER_MODEL = _env("OPENROUTER_MODEL", "deepseek/deepseek-v4-flash")
 AI_ENABLED = bool(OPENROUTER_API_KEY)
 
 # ── панель ─────────────────────────────────────────────────────────────

@@ -243,6 +243,25 @@ def main() -> int:
 
     asyncio.run(health())
 
+    section("Разворачивание с нуля")
+    deploy_sh = (ROOT / "deploy/deploy.sh").read_text(encoding="utf-8")
+    check("деплой останавливается, если каталог не репозиторий",
+          "не является git-репозиторием" in deploy_sh and "exit 1" in deploy_sh)
+    check("деплой показывает, какой код выкатил", "git log --oneline -1" in deploy_sh)
+    status_sh = (ROOT / "deploy/status.sh").read_text(encoding="utf-8")
+    check("статус показывает версию кода", "ВЕРСИЯ:" in status_sh and "git -C" in status_sh)
+    check("вывод версии не после exit",
+          status_sh.index("VERSION=") < status_sh.index("exit 0"))
+    check("модель по умолчанию — проверенная",
+          db.DEFAULT_SETTINGS["model"] == "deepseek/deepseek-v4-flash",
+          db.DEFAULT_SETTINGS["model"])
+    example = (ROOT / ".env.example").read_text(encoding="utf-8")
+    check("пример .env не обещает лишних переменных",
+          "SHEETS_SYNC_MINUTES" not in example and "OPENROUTER_MODEL" in example)
+    check("сторонних зависимостей ровно восемь",
+          len([line for line in (ROOT / "requirements.txt").read_text(encoding="utf-8").splitlines()
+               if line.strip()]) == 8)
+
     section("Сайт из настроек")
 
     async def site_reading() -> None:

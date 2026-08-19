@@ -16,6 +16,19 @@ if [ -d .git ]; then
   echo "== свежий код"
   git fetch --quiet origin
   git reset --hard --quiet "origin/$(git rev-parse --abbrev-ref HEAD)"
+  echo "   $(git log --oneline -1)"
+else
+  # Каталог без .git — код когда-то скопировали, а не склонировали. Тогда
+  # обновление кода молча не делалось: служба перезапускалась на прежней версии,
+  # и правки «не доезжали». Молчать про это нельзя.
+  echo
+  echo "ОСТАНОВКА: $APP_DIR не является git-репозиторием, свежий код взять негде."
+  echo "Разверните как в README:"
+  echo "  git clone https://github.com/iarbor04/ai-sales-agent.git ai-sales"
+  echo "или подключите этот каталог к репозиторию, сохранив .env и базу:"
+  echo "  git init && git remote add origin https://github.com/iarbor04/ai-sales-agent.git"
+  echo "  git fetch origin main && git reset --hard origin/main"
+  exit 1
 fi
 
 echo "== зависимости"
