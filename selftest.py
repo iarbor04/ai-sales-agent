@@ -183,6 +183,42 @@ def main() -> int:
     db.set_setting("kb_refresh_hours", "0")
     check("ноль часов выключает перечитывание", not knowledge.refresh_due())
 
+    section("Сайт из настроек")
+
+    async def site_reading() -> None:
+        from app import knowledge as kb
+        from app.web import main as web
+
+        calls = {}
+        original_discover, original_fetch = kb.discover, kb.fetch_pending
+        def fake_discover(site, max_pages=None):
+            calls["site"] = site
+            return {"found": 3}
+
+        kb.discover = fake_discover
+        kb.fetch_pending = lambda: {"loaded": 3}
+        try:
+            result = await web.read_site("example.com")
+        finally:
+            kb.discover, kb.fetch_pending = original_discover, original_fetch
+        check("сохранение сайта запускает обход и загрузку",
+              calls.get("site") == "example.com" and result["loaded"] == 3, str(result))
+
+        # недоступный сайт не должен ронять фоновую задачу
+        def boom(site, max_pages=None):
+            raise OSError("сайт недоступен")
+
+        kb.discover = boom
+        try:
+            result = await web.read_site("example.com")
+        finally:
+            kb.discover = original_discover
+        check("недоступный сайт не роняет службу", result["loaded"] == 0 and "error" in result)
+
+    asyncio.run(site_reading())
+    check("под полем сайта написано, что будет дальше",
+          "обойдёт страницы" in (ROOT / "app/web/templates/settings.html").read_text(encoding="utf-8"))
+
     section("Нет мёртвого кода")
     tables_now = {r["name"] for r in db.q(
         "SELECT name FROM sqlite_master WHERE type='table'")}

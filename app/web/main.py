@@ -696,9 +696,32 @@ def _key_source() -> str:
     return ""
 
 
+async def read_site(site: str) -> dict:
+    """Обойти сайт и загрузить тексты страниц.
+
+    Обход занимает от десятков секунд до пары минут, поэтому зовётся фоном:
+    держать на нём сохранение настроек нельзя. Владелец видит результат в
+    разделе «База знаний».
+    """
+    try:
+        found = await asyncio.to_thread(knowledge.discover, site)
+        loaded = await asyncio.to_thread(knowledge.fetch_pending)
+        retrieval.invalidate()
+        log.info("сайт %s: найдено страниц %s, загружено %s",
+                 site, found.get("found", 0), loaded.get("loaded", 0))
+        return {"found": found.get("found", 0), "loaded": loaded.get("loaded", 0)}
+    except Exception as exc:  # noqa: BLE001 — фоновая задача не должна ронять службу
+        log.warning("сайт %s не прочитался: %s", site, exc)
+        return {"found": 0, "loaded": 0, "error": str(exc)}
+
+
 @app.post("/settings")
 async def settings_save(request: Request):
     form = await request.form()
+    # Адрес сайта в этом поле раньше только запоминался: владелец сохранял его
+    # и ждал, что агент прочитает сайт, а обход надо было запускать руками в
+    # другом разделе. Теперь сохранение нового адреса и запускает чтение.
+    previous_site = db.setting("business_site", "").strip()
     for key in ("business_name", "business_site", "greeting", "tone", "model",
                 "operator_chat_id", "managers", "handoff_note",
                 "sheets_crm_id", "sheets_crm_tab"):
@@ -722,13 +745,23 @@ async def settings_save(request: Request):
 
     db.set_setting("ai_enabled_global", "1" if form.get("ai_enabled_global") else "0")
 
+    site = str(form.get("business_site") or "").strip()
+    site_note = ""
+    if site and site != previous_site:
+        asyncio.create_task(read_site(site))
+        site_note = (f" Читаю сайт {site} — страницы появятся в разделе «База знаний»"
+                     " через минуту-другую.")
+
     # Новый ключ проверяем сразу: узнать об отказе через неделю по молчащему
     # агенту — худший из возможных вариантов.
     if new_key:
         check = await llm.check_key(force=True)
         return RedirectResponse(
-            "/settings?" + ("ok=" if check["ok"] else "error=") + quote(check["detail"]),
+            "/settings?" + ("ok=" if check["ok"] else "error=") + quote(check["detail"] + site_note),
             status_code=303)
+    if site_note:
+        return RedirectResponse("/settings?ok=" + quote("Настройки сохранены." + site_note),
+                                status_code=303)
     return RedirectResponse("/settings", status_code=303)
 
 

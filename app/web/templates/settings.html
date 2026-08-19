@@ -35,7 +35,11 @@
       <div class="field"><label>Название</label>
         <input type="text" name="business_name" value="{{ values.business_name }}"></div>
       <div class="field"><label>Сайт</label>
-        <input type="text" name="business_site" value="{{ values.business_site }}"></div>
+        <input type="text" name="business_site" value="{{ values.business_site }}"
+               placeholder="example.com">
+        <span class="note">Сохраните — агент сам обойдёт страницы и положит их
+          в <a href="/knowledge">Базу знаний</a>. Там же видно, что загрузилось,
+          и можно выкинуть лишнее.</span></div>
     </div>
     <div class="field"><label>Приветствие на /start</label>
       <textarea name="greeting">{{ values.greeting }}</textarea></div>
