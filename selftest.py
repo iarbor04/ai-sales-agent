@@ -244,17 +244,25 @@ def main() -> int:
     asyncio.run(health())
 
     section("Разворачивание с нуля")
+    from app import providers as providers_mod
     deploy_sh = (ROOT / "deploy/deploy.sh").read_text(encoding="utf-8")
     check("деплой останавливается, если каталог не репозиторий",
           "не является git-репозиторием" in deploy_sh and "exit 1" in deploy_sh)
     check("деплой показывает, какой код выкатил", "git log --oneline -1" in deploy_sh)
+    check("деплой не полагается на имя локальной ветки",
+          "@{upstream}" in deploy_sh and "origin/main" in deploy_sh)
     status_sh = (ROOT / "deploy/status.sh").read_text(encoding="utf-8")
     check("статус показывает версию кода", "ВЕРСИЯ:" in status_sh and "git -C" in status_sh)
     check("вывод версии не после exit",
           status_sh.index("VERSION=") < status_sh.index("exit 0"))
-    check("модель по умолчанию — проверенная",
-          db.DEFAULT_SETTINGS["model"] == "deepseek/deepseek-v4-flash",
-          db.DEFAULT_SETTINGS["model"])
+    # Значение проверяем по исходнику: с чужим .env на сервере DEFAULT_SETTINGS
+    # берёт модель оттуда, и проверка «что вышло» ловила бы настройку клиента.
+    config_py = (ROOT / "app/config.py").read_text(encoding="utf-8")
+    check("модель по умолчанию в коде — проверенная",
+          'OPENROUTER_MODEL", "deepseek/deepseek-v4-flash"' in config_py)
+    check("провайдеры согласны про модель по умолчанию",
+          providers_mod.openrouter.DEFAULT_MODEL == "deepseek/deepseek-v4-flash",
+          providers_mod.openrouter.DEFAULT_MODEL)
     example = (ROOT / ".env.example").read_text(encoding="utf-8")
     check("пример .env не обещает лишних переменных",
           "SHEETS_SYNC_MINUTES" not in example and "OPENROUTER_MODEL" in example)

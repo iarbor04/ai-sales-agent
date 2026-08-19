@@ -15,7 +15,26 @@ bash deploy/backup.sh >/dev/null 2>&1 || echo "   базы ещё нет, про
 if [ -d .git ]; then
   echo "== свежий код"
   git fetch --quiet origin
-  git reset --hard --quiet "origin/$(git rev-parse --abbrev-ref HEAD)"
+
+  # Куда равняться. Локальная ветка может называться иначе, чем удалённая:
+  # каталог, поднятый через «git init», получает master, а на GitHub main —
+  # и деплой уходил искать несуществующий origin/master.
+  TARGET=$(git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null || true)
+  if [ -z "$TARGET" ]; then
+    for CANDIDATE in "origin/$(git rev-parse --abbrev-ref HEAD)" origin/main origin/master; do
+      if git rev-parse --verify --quiet "$CANDIDATE" >/dev/null; then
+        TARGET=$CANDIDATE
+        break
+      fi
+    done
+  fi
+  if [ -z "$TARGET" ]; then
+    echo "ОСТАНОВКА: не нашёл ветку на origin. Проверьте: git remote -v && git branch -a"
+    exit 1
+  fi
+
+  echo "   равняемся на $TARGET"
+  git reset --hard --quiet "$TARGET"
   echo "   $(git log --oneline -1)"
 else
   # Каталог без .git — код когда-то скопировали, а не склонировали. Тогда
