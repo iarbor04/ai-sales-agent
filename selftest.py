@@ -255,6 +255,9 @@ def main() -> int:
     check("статус показывает версию кода", "ВЕРСИЯ:" in status_sh and "git -C" in status_sh)
     check("вывод версии не после exit",
           status_sh.index("VERSION=") < status_sh.index("exit 0"))
+    check("статус ждёт ответа службы, а не угадывает время старта",
+          "for _ in $(seq 1 20)" in status_sh and "sleep 3" not in
+          (ROOT / "deploy/deploy.sh").read_text(encoding="utf-8"))
     # Значение проверяем по исходнику: с чужим .env на сервере DEFAULT_SETTINGS
     # берёт модель оттуда, и проверка «что вышло» ловила бы настройку клиента.
     config_py = (ROOT / "app/config.py").read_text(encoding="utf-8")

@@ -55,6 +55,6 @@ echo "== зависимости"
 
 echo "== перезапуск"
 $SUDO systemctl restart $SERVICE
-sleep 3
 
+# status.sh сам дождётся ответа службы — угадывать время старта не нужно
 bash deploy/status.sh

@@ -8,7 +8,16 @@ PORT=$(grep -E '^PORT=' "$APP_DIR/.env" 2>/dev/null | cut -d= -f2 | tr -d ' ' ||
 PORT=${PORT:-8000}
 
 STATE=$(systemctl is-active $SERVICE 2>/dev/null || echo "не установлена")
-HEALTH=$(curl -s -m 5 "http://127.0.0.1:$PORT/health" 2>/dev/null || true)
+
+# Служба поднимается 5–8 секунд: боты выходят на связь, планировщик стартует.
+# Фиксированная пауза давала ложное «не отвечает» после каждого деплоя, поэтому
+# ждём появления ответа, а не угадываем время.
+HEALTH=""
+for _ in $(seq 1 20); do
+  HEALTH=$(curl -s -m 3 "http://127.0.0.1:$PORT/health" 2>/dev/null || true)
+  [ -n "$HEALTH" ] && break
+  sleep 1
+done
 
 # Версия кода — первый вопрос при разборе «почему правки не видно».
 if [ -d "$APP_DIR/.git" ]; then
