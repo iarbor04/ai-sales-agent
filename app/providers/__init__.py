@@ -6,10 +6,10 @@
 from __future__ import annotations
 
 from .. import db
-from . import gigachat, openrouter, yandex
+from . import openrouter, yandex
 from .base import LLMError, LLMTruncated, human_error, tidy  # noqa: F401 — общий вход
 
-ALL = (openrouter, yandex, gigachat)
+ALL = (openrouter, yandex)
 DEFAULT = openrouter.NAME
 
 

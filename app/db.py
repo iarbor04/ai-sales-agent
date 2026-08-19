@@ -403,14 +403,10 @@ DEFAULT_SETTINGS = {
     "kb_extra": "",
     # ключ вставляется в панели; .env остаётся запасным вариантом
     "openrouter_key": "",
-    # какой провайдер отвечает клиентам: openrouter, yandex или gigachat
+    # какой провайдер отвечает клиентам: openrouter или yandex
     "model_provider": "openrouter",
     "yandex_api_key": "",
     "yandex_folder_id": "",
-    "gigachat_client_id": "",
-    "gigachat_client_secret": "",
-    "gigachat_scope": "GIGACHAT_API_PERS",
-    "gigachat_verify_tls": "1",
     # Google Таблицы: база знаний на чтение, лиды на запись
     "sheets_crm_id": "",
     "sheets_crm_tab": "Лиды",
@@ -456,6 +452,7 @@ def init() -> None:
 
     _migrate_contacts_key()
     _migrate_sheet_knowledge()
+    _drop_gigachat()
 
     for key, value in DEFAULT_SETTINGS.items():
         run("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (key, value))
@@ -480,6 +477,18 @@ def init() -> None:
                 " VALUES (NULL, ?, ?, ?, ?, 1)",
                 (position, title, goal, field),
             )
+
+
+def _drop_gigachat() -> None:
+    """GigaChat убран из продукта: его настройки — мёртвые данные.
+
+    Если он был выбран провайдером, возвращаем OpenRouter, иначе панель показывала
+    бы выбор, которого больше нет.
+    """
+    if q1("SELECT 1 FROM settings WHERE key = 'model_provider' AND value = 'gigachat'"):
+        run("UPDATE settings SET value = 'openrouter' WHERE key = 'model_provider'")
+        run("UPDATE settings SET value = 'deepseek/deepseek-v4-flash' WHERE key = 'model'")
+    run("DELETE FROM settings WHERE key LIKE 'gigachat_%'")
 
 
 def _migrate_sheet_knowledge() -> None:

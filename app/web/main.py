@@ -772,15 +772,10 @@ async def settings_save(request: Request):
     if form.get("drop_key"):
         db.set_setting("openrouter_key", "")
 
-    for field in ("yandex_api_key", "yandex_folder_id",
-                  "gigachat_client_id", "gigachat_client_secret", "gigachat_scope"):
+    for field in ("yandex_api_key", "yandex_folder_id"):
         value = str(form.get(field) or "").strip()
         if value:
             db.set_setting(field, "".join(value.split()))
-    db.set_setting("gigachat_verify_tls", "0" if form.get("gigachat_insecure") else "1")
-    if any(form.get(field) for field in ("gigachat_client_id", "gigachat_client_secret",
-                                         "gigachat_scope")) or form.get("gigachat_insecure"):
-        providers.gigachat.forget_token()
 
     db.set_setting("ai_enabled_global", "1" if form.get("ai_enabled_global") else "0")
 
@@ -793,8 +788,7 @@ async def settings_save(request: Request):
 
     # Новый ключ проверяем сразу: узнать об отказе через неделю по молчащему
     # агенту — худший из возможных вариантов.
-    if new_key or chosen != previous_provider or any(
-            form.get(field) for field in ("yandex_api_key", "gigachat_client_secret")):
+    if new_key or chosen != previous_provider or form.get("yandex_api_key"):
         check = await llm.check_key(force=True)
         return RedirectResponse(
             "/settings?" + ("ok=" if check["ok"] else "error=") + quote(check["detail"] + site_note),

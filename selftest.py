@@ -443,10 +443,9 @@ def main() -> int:
 
     async def model_providers() -> None:
         from app import llm, providers
-        from app.providers import gigachat, yandex
+        from app.providers import yandex
 
-        check("провайдеров трое", {p.NAME for p in providers.ALL}
-              == {"openrouter", "yandex", "gigachat"})
+        check("провайдеров двое", {p.NAME for p in providers.ALL} == {"openrouter", "yandex"})
         check("неизвестное имя не роняет панель", providers.get("что-то").NAME == "openrouter")
 
         # ── YandexGPT: свой формат запроса и ответа ──
@@ -502,55 +501,21 @@ def main() -> int:
             yandex.API_URL = original
             db.set_setting("yandex_folder_id", "b1gtest")
 
-        # ── GigaChat: токен на полчаса, обновление при 401 ──
-        calls = {"oauth": 0, "chat": 0}
-
-        def giga_handler(path, raw):
-            if "oauth" in path:
-                calls["oauth"] += 1
-                return 200, {"access_token": f"token-{calls['oauth']}",
-                             "expires_at": int((time.time() + 1800) * 1000)}
-            calls["chat"] += 1
-            if calls["chat"] == 2:  # имитируем истёкший раньше срока токен
-                return 401, {"message": "Unauthorized"}
-            return 200, {"choices": [{"finish_reason": "stop",
-                                      "message": {"content": "Готово"}}]}
-
-        server = stub_server(giga_handler)
-        oauth_url, api_url = gigachat.OAUTH_URL, gigachat.API_URL
-        gigachat.OAUTH_URL = f"http://127.0.0.1:{server.server_port}/api/v2/oauth"
-        gigachat.API_URL = f"http://127.0.0.1:{server.server_port}/chat/completions"
-        db.set_setting("model_provider", "gigachat")
-        db.set_setting("gigachat_client_id", "id-test")
-        db.set_setting("gigachat_client_secret", "secret-test")
-        db.set_setting("model", "GigaChat")
-        gigachat.forget_token()
-        try:
-            check("GigaChat настроен и выбран",
-                  llm.ai_ready() and llm.provider().NAME == "gigachat")
-            first = await llm._call("система", "вопрос", max_tokens=100)
-            check("GigaChat отвечает через общий вызов", first == "Готово", first)
-            check("токен берётся один раз", calls["oauth"] == 1, f"запросов токена {calls['oauth']}")
-            second = await llm._call("система", "вопрос", max_tokens=100)
-            check("на 401 токен обновляется и запрос повторяется",
-                  second == "Готово" and calls["oauth"] == 2,
-                  f"токенов {calls['oauth']}, чатов {calls['chat']}")
-            checked = await gigachat.check_credentials()
-            check("проверка пары доступа проходит", checked["ok"], str(checked))
-        finally:
-            server.shutdown()
-            gigachat.OAUTH_URL, gigachat.API_URL = oauth_url, api_url
-            gigachat.forget_token()
-
         # смена провайдера меняет модель на его собственную
         from app.web import main as web
-        db.set_setting("model_provider", "openrouter")
-        db.set_setting("model", "GigaChat")
         db.set_setting("model_provider", "yandex")
         db.set_setting("model", providers.get("yandex").DEFAULT_MODEL)
         check("у каждого провайдера своя модель по умолчанию",
-              providers.get("yandex").DEFAULT_MODEL != providers.get("openrouter").DEFAULT_MODEL
-              != providers.get("gigachat").DEFAULT_MODEL)
+              providers.get("yandex").DEFAULT_MODEL != providers.get("openrouter").DEFAULT_MODEL)
+        # у кого GigaChat был выбран, при обновлении не должен остаться без провайдера
+        db.set_setting("model_provider", "gigachat")
+        db.set_setting("gigachat_client_id", "старое")
+        db.init()
+        check("выбранный GigaChat заменяется на OpenRouter",
+              db.setting("model_provider") == "openrouter", db.setting("model_provider"))
+        check("настройки GigaChat не остаются мусором в базе",
+              not db.q("SELECT 1 FROM settings WHERE key LIKE 'gigachat_%'"))
+
         check("панель знает про поля всех провайдеров",
               all(item["fields"] for item in providers.options())
               and any(f["key"] == "yandex_folder_id" for f in providers.options()[1]["fields"]))
@@ -558,8 +523,6 @@ def main() -> int:
         db.set_setting("model_provider", "openrouter")
         db.set_setting("model", "openai/gpt-4o-mini")
         db.set_setting("yandex_api_key", "")
-        db.set_setting("gigachat_client_id", "")
-        db.set_setting("gigachat_client_secret", "")
 
     asyncio.run(model_providers())
 

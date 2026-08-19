@@ -88,16 +88,6 @@
                placeholder="{% if field.secret and values.get(field.key) %}сохранено — впишите новое, чтобы заменить{% else %}{{ field.hint }}{% endif %}">
       </div>
       {% endfor %}
-      {% if item.name == 'gigachat' %}
-      <label class="check">
-        <input type="checkbox" name="gigachat_insecure"
-               {{ 'checked' if values.get('gigachat_verify_tls') == '0' }}>
-        <span>не проверять сертификат</span>
-      </label>
-      <p class="note">Сертификат GigaChat подписан НУЦ Минцифры. Если на сервере нет
-        его корневых сертификатов, запрос падает на проверке TLS — тогда либо
-        поставьте сертификаты, либо снимите галочку проверки здесь.</p>
-      {% endif %}
       {% if item.name == 'openrouter' and ai_ready and provider == 'openrouter' %}
       <label class="check"><input type="checkbox" name="drop_key">
         <span>удалить сохранённый ключ</span></label>
