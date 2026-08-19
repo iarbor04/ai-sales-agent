@@ -6,4 +6,3 @@ python-multipart==0.0.20
 itsdangerous==2.2.0
 httpx==0.28.1
 google-auth==2.38.0
-pypdf==5.1.0

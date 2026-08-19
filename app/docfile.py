@@ -1,17 +1,16 @@
-"""Документы в базу знаний: PDF, DOCX, TXT и Markdown.
+"""Документы в базу знаний: DOCX, TXT и Markdown.
 
 Прайс — это таблица, а условия, гарантии и регламенты живут в документах, и
 переносить их руками в поле «вписать руками» никто не будет.
 
-DOCX читается стандартной библиотекой: это zip с XML внутри, как xlsx. Для PDF
-взят pypdf — чистый Python без системных зависимостей. Самодельный разбор PDF
-здесь был бы ошибкой: там сжатые потоки, шрифты и кодировки, и на половине
-настоящих файлов он молча отдавал бы кашу вместо текста, а это хуже отсутствия
-функции.
+Всё читается стандартной библиотекой: docx — это zip с XML внутри, как xlsx.
+Сторонних зависимостей здесь нет намеренно: коробку разворачивает агент запуска
+одной командой, и каждый лишний пакет — это ещё одна причина, по которой
+установка встанет на чужом сервере.
 
-Скан без текстового слоя мы честно отказываемся принимать: распознавания
-изображений в проекте нет, а пустой документ в базе знаний хуже, чем его
-отсутствие — агент будет думать, что ответ есть.
+PDF по этой же причине не поддерживаем: без внешней библиотеки текст из него не
+достать, а самодельный разбор на половине настоящих файлов молча отдаёт кашу.
+Владельцу говорим прямо, что делать вместо этого.
 """
 from __future__ import annotations
 
@@ -25,15 +24,9 @@ from . import knowledge
 
 log = logging.getLogger("docfile")
 
-# pypdf охотно ругается на мелкие огрехи вёрстки («Ignoring wrong pointing
-# object») в совершенно читаемых файлах. В журнале службы это шум, который
-# мешает видеть настоящие ошибки.
-logging.getLogger("pypdf").setLevel(logging.ERROR)
-
 MAX_BYTES = 25 * 1024 * 1024
-SUPPORTED = (".pdf", ".docx", ".txt", ".md")
-# Ниже этого порога считаем, что текста в файле нет: у сканов pypdf возвращает
-# пустоту или несколько случайных символов из подписей.
+SUPPORTED = (".docx", ".txt", ".md")
+# Ниже этого порога считаем, что текста в файле нет.
 MIN_TEXT_CHARS = 40
 
 _W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
@@ -88,59 +81,28 @@ def _docx(data: bytes) -> str:
     return "\n".join(lines)
 
 
-def _pdf(data: bytes) -> str:
-    try:
-        from pypdf import PdfReader
-    except ImportError as exc:  # noqa: F841 — зависимость обязательна, но объясняем
-        raise DocumentError(
-            "на сервере не установлен pypdf — выполните "
-            "«.venv/bin/pip install -r requirements.txt»") from exc
-
-    try:
-        reader = PdfReader(io.BytesIO(data))
-    except Exception as exc:  # noqa: BLE001 — библиотека бросает своё на битых файлах
-        raise DocumentError(f"PDF не читается: {str(exc)[:120]}") from exc
-
-    if getattr(reader, "is_encrypted", False):
-        try:
-            reader.decrypt("")
-        except Exception as exc:  # noqa: BLE001
-            raise DocumentError("PDF защищён паролем — снимите пароль и загрузите заново") from exc
-
-    pages = []
-    for number, page in enumerate(reader.pages, start=1):
-        try:
-            pages.append((page.extract_text() or "").strip())
-        except Exception as exc:  # noqa: BLE001 — одна страница не должна ронять весь файл
-            log.warning("страница %s PDF не прочиталась: %s", number, exc)
-    return "\n\n".join(part for part in pages if part)
-
-
 def read_text(file_name: str, data: bytes) -> str:
     """Текст документа. Формат определяем по расширению."""
     name = (file_name or "").strip().lower()
-    # Про старый Word говорим прямо: общий список форматов тут не помогает,
-    # человеку нужно одно действие — пересохранить.
+    # Про каждый непринятый формат говорим одно понятное действие, а не общий
+    # список: человеку нужно знать, что сделать, а не что бывает.
+    if name.endswith(".pdf"):
+        raise DocumentError("PDF мы не читаем: сохраните документ как DOCX "
+                            "(в Word «Сохранить как») или скопируйте текст "
+                            "в поле «вписать руками»")
     if name.endswith(".doc"):
         raise DocumentError("старый формат .doc не читается — откройте в Word "
                             "и сохраните как docx")
     if name.endswith(".rtf") or name.endswith(".odt"):
-        raise DocumentError("этот формат не читается — сохраните документ как docx или PDF")
+        raise DocumentError("этот формат не читается — сохраните документ как docx")
     if not name.endswith(SUPPORTED):
-        raise DocumentError("подойдёт PDF, DOCX, TXT или Markdown")
+        raise DocumentError("подойдёт DOCX, TXT или Markdown, а для прайса — xlsx или csv")
     if not data:
         raise DocumentError("файл пустой")
     if len(data) > MAX_BYTES:
         raise DocumentError("файл больше 25 МБ — разбейте его на части")
 
-    if name.endswith(".pdf"):
-        text = _pdf(data)
-        if len(text) < MIN_TEXT_CHARS:
-            raise DocumentError(
-                "в PDF нет текстового слоя — похоже, это сканы страниц. "
-                "Распознавания у нас нет: сохраните документ с текстом или "
-                "скопируйте его в поле «вписать руками»")
-    elif name.endswith(".docx"):
+    if name.endswith(".docx"):
         text = _docx(data)
     else:
         text = _decode(data)

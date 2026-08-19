@@ -749,54 +749,20 @@ def main() -> int:
         broken = ""
     check("битый docx не роняет загрузку", not broken, broken)
 
-    # PDF: собираем настоящий файл с текстовым слоем
-    def make_pdf(lines: list[str]) -> bytes:
-        from pypdf import PdfWriter
-        from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
-
-        stream = "BT /F1 12 Tf 40 700 Td " + " ".join(
-            f"({line}) Tj 0 -16 Td" for line in lines) + " ET"
-        writer = PdfWriter()
-        page = writer.add_blank_page(width=595, height=842)
-        content = DecodedStreamObject()
-        content.set_data(stream.encode("latin-1"))
-        page[NameObject("/Contents")] = writer._add_object(content)
-        font = DictionaryObject()
-        font.update({NameObject("/Type"): NameObject("/Font"),
-                     NameObject("/Subtype"): NameObject("/Type1"),
-                     NameObject("/BaseFont"): NameObject("/Helvetica")})
-        resources = DictionaryObject()
-        fonts = DictionaryObject()
-        fonts[NameObject("/F1")] = writer._add_object(font)
-        resources[NameObject("/Font")] = fonts
-        page[NameObject("/Resources")] = resources
-        buffer = _io_bytes()
-        writer.write(buffer)
-        return buffer.getvalue()
-
-    def _io_bytes():
-        import io as _io
-        return _io.BytesIO()
-
-    pdf = make_pdf(["Delivery costs 500 rub per city order",
-                    "Warranty is 18 months for the frame"])
-    text = docfile.read_text("условия.pdf", pdf)
-    check("pdf с текстовым слоем читается", "Delivery costs 500" in text, text[:80])
-
     try:
-        docfile.read_text("скан.pdf", make_pdf([]))
-        scan = "скан принят как документ"
+        docfile.read_text("договор.pdf", b"%PDF-1.4 fake")
+        pdf_hint = "PDF принят, хотя мы его не читаем"
     except docfile.DocumentError as exc:
-        scan = "" if "текстового слоя" in str(exc) else str(exc)
-    check("скан без текста отклоняется с объяснением", not scan, scan)
+        pdf_hint = "" if "DOCX" in str(exc) else str(exc)
+    check("про PDF сказано, что делать вместо него", not pdf_hint, pdf_hint)
 
-    saved = docfile.save("условия.pdf", pdf)
+    saved = docfile.save("условия.docx", document)
     stored = db.q1("SELECT title, text FROM kb_pages WHERE id = ?", (saved["page_id"],))
     check("документ попадает в базу знаний",
-          stored is not None and "Delivery costs" in stored["text"])
+          stored is not None and "Доставка по городу" in stored["text"])
     retrieval.invalidate()
     check("агент находит текст из документа",
-          "Delivery" in retrieval.context_for("delivery cost"))
+          "Доставка" in retrieval.context_for("сколько стоит доставка"))
     check("документ виден в общем списке файлов",
           any(row["id"] == saved["page_id"] for row in knowledge.uploads()))
     knowledge.remove_upload(saved["page_id"])
@@ -807,7 +773,7 @@ def main() -> int:
         docfile.read_text("картинка.png", b"\x89PNG")
         wrong = "принят неподходящий формат"
     except docfile.DocumentError as exc:
-        wrong = "" if "PDF" in str(exc) and "DOCX" in str(exc) else str(exc)
+        wrong = "" if "DOCX" in str(exc) and "xlsx" in str(exc) else str(exc)
     check("неподходящий формат называет подходящие", not wrong, wrong)
 
     section("Прайс файлом")

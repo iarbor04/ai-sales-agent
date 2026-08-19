@@ -19,19 +19,19 @@
 <div class="card">
   <h2>Файлом <span class="hint">самый быстрый способ</span></h2>
   <p class="lead-text">
-    Таблица или документ — <b>xlsx, csv, PDF, DOCX, TXT, Markdown</b>. Строки
+    Таблица или документ — <b>xlsx, csv, DOCX, TXT, Markdown</b>. Строки
     таблицы станут фактами «заголовок: значение», текст документа — абзацами.
     Ни ключей, ни публикации: файл никуда не уходит с вашего сервера.
   </p>
   <form method="post" action="/knowledge/file" enctype="multipart/form-data" class="row">
     <div class="field">
       <label>Прайс, условия, регламент, договор</label>
-      <input type="file" name="file" accept=".xlsx,.csv,.tsv,.pdf,.docx,.txt,.md">
+      <input type="file" name="file" accept=".xlsx,.csv,.tsv,.docx,.txt,.md">
       <span class="note">
         В таблице первая строка — заголовки столбцов; столбцы с закупкой,
         наценкой и поставщиком агенту не показываются. Из документа берём текст
-        и таблицы. Скан без текстового слоя не подойдёт — распознавания у нас
-        нет. Старые форматы .xls и .doc не читаются, пересохраните в новых.
+        и таблицы. PDF не читаем — сохраните его как DOCX. Старые форматы .xls
+        и .doc тоже не подойдут, пересохраните в новых.
       </span>
     </div>
     <button class="btn" type="submit">Загрузить</button>

@@ -430,7 +430,7 @@ async def kb_file(request: Request):
     upload = form.get("file")
     if upload is None or not getattr(upload, "filename", ""):
         return RedirectResponse(
-            "/knowledge?error=" + quote("Выберите файл: xlsx, csv, PDF, DOCX, TXT или Markdown"),
+            "/knowledge?error=" + quote("Выберите файл: xlsx, csv, DOCX, TXT или Markdown"),
             status_code=303)
     data = await upload.read()
     name = upload.filename
