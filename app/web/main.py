@@ -27,8 +27,8 @@ from fastapi.templating import Jinja2Templates
 from itsdangerous import BadSignature, URLSafeSerializer
 
 from .. import (
-    booking, broadcast, config, db, knowledge, llm, onboarding, pricefile,
-    retrieval, rivals, sales, scheduler, sheets,
+    autochain, booking, broadcast, config, db, knowledge, llm, onboarding,
+    pricefile, retrieval, rivals, sales, scheduler, sheets,
 )
 from .. import channels
 from ..channels import base, telegram, whatsapp
@@ -38,6 +38,7 @@ log = logging.getLogger("web")
 
 BASE_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
+templates.env.filters["fromjson"] = lambda value: json.loads(value or "{}")
 signer = URLSafeSerializer(config.SECRET_KEY, salt="session")
 
 templates.env.filters["dt"] = lambda ts: (
@@ -581,6 +582,59 @@ async def broadcast_retry(broadcast_id: int):
     db.run("UPDATE broadcasts SET status = 'confirmed' WHERE id = ?", (broadcast_id,))
     asyncio.create_task(broadcast.send_broadcast(broadcast_id))
     return RedirectResponse("/broadcast", status_code=303)
+
+
+# ── автоцепочки ────────────────────────────────────────────────────────
+
+@app.get("/autochains", response_class=HTMLResponse)
+async def autochains_page(request: Request, edit: int | None = None):
+    rows = autochain.chains()
+    chain_steps = {row["id"]: autochain.steps(row["id"]) for row in rows}
+    editing = next((row for row in rows if row["id"] == edit), None)
+    return page(request, "autochains.html", rows=rows, chain_steps=chain_steps,
+                editing=editing,
+                editing_steps=[dict(step) for step in chain_steps.get(edit, [])],
+                languages=BROADCAST_LANGUAGES, stats=autochain.stats())
+
+
+@app.post("/autochains")
+async def autochains_save(request: Request):
+    """Сохранить цепочку целиком: шаги приходят из формы плоским списком."""
+    form = await request.form()
+    chain_id = int(form.get("chain_id") or 0) or None
+    positions = sorted({key.split(".")[1] for key in form if key.startswith("delay.")},
+                       key=lambda value: int(value))
+    items = []
+    for position in positions:
+        items.append({
+            "delay_min": int(str(form.get(f"delay.{position}") or 0) or 0),
+            "enabled": form.get(f"enabled.{position}") is not None,
+            "texts": {code: str(form.get(f"text.{position}.{code}") or "")
+                      for code, _ in BROADCAST_LANGUAGES},
+            "buttons": [{"text": str(form.get(f"btitle.{position}.{index}") or ""),
+                         "url": str(form.get(f"burl.{position}.{index}") or "")}
+                        for index in range(3)],
+        })
+    try:
+        await asyncio.to_thread(autochain.save_chain,
+                                str(form.get("name") or ""), items, chain_id)
+    except ValueError as exc:
+        return RedirectResponse("/autochains?error=" + quote(str(exc)), status_code=303)
+    return RedirectResponse("/autochains?ok=" + quote("Цепочка сохранена"), status_code=303)
+
+
+@app.post("/autochains/{chain_id}/toggle")
+async def autochains_toggle(chain_id: int):
+    row = db.q1("SELECT enabled FROM autochains WHERE id = ?", (chain_id,))
+    if row:
+        autochain.set_enabled(chain_id, not row["enabled"])
+    return RedirectResponse("/autochains", status_code=303)
+
+
+@app.post("/autochains/{chain_id}/delete")
+async def autochains_delete(chain_id: int):
+    autochain.delete_chain(chain_id)
+    return RedirectResponse("/autochains?ok=" + quote("Цепочка удалена"), status_code=303)
 
 
 # ── настройки ──────────────────────────────────────────────────────────

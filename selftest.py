@@ -617,6 +617,103 @@ def main() -> int:
     check("файл убирается из базы знаний",
           db.q1("SELECT id FROM kb_pages WHERE id = ?", (saved["page_id"],)) is None)
 
+    section("Автоцепочки")
+    from app import autochain, scheduler
+
+    async def chains() -> None:
+        # тик планировщика прогоняем целиком: пропущенный импорт внутри модуля
+        # иначе всплывёт только в продакшене
+        await scheduler._tick()
+        check("тик планировщика проходит целиком", True)
+
+        chain_id = autochain.save_chain("Прогрев", [
+            {"delay_min": 0, "texts": {"ru": "Здравствуйте, {{first_name}}! Ещё актуально?"}},
+            {"delay_min": 60, "texts": {"ru": "Напоминаю о себе", "en": "Just a reminder"},
+             "buttons": [{"text": "Прайс", "url": "https://ascn.ai"}]},
+        ])
+        check("цепочка сохраняется с шагами", len(autochain.steps(chain_id)) == 2)
+
+        for bad, why in (
+            (("", [{"delay_min": 0, "texts": {"ru": "текст"}}]), "без названия"),
+            (("Пустая", []), "без шагов"),
+            (("Без текста", [{"delay_min": 0, "texts": {}}]), "шаг без текста"),
+            (("Минус", [{"delay_min": -5, "texts": {"ru": "текст"}}]), "отрицательная задержка"),
+        ):
+            try:
+                autochain.save_chain(*bad)
+                outcome = f"приняли кривую цепочку ({why})"
+            except ValueError:
+                outcome = ""
+            check(f"кривая цепочка не сохраняется — {why}", not outcome, outcome)
+
+        # молчун получает первый шаг
+        quiet = db.upsert_contact("tg", "980", "quiet", "Молчун", bot_id=bot_id)
+        db.add_message(quiet["id"], "in", "client", "здравствуйте")
+        created = autochain.enroll(quiet["id"])
+        check("клиент ставится в очередь по включённой цепочке", created == 2, f"заданий {created}")
+        check("повторная постановка не задваивает", autochain.enroll(quiet["id"]) == 0)
+
+        sent = []
+
+        async def fake_send(contact_id, text, media_path=None, author="ai", buttons=None, **kw):
+            sent.append((contact_id, text, tuple(buttons or ())))
+            db.add_message(contact_id, "out", author, text)
+            return True, "sent"
+
+        original = autochain.base.send
+        autochain.base.send = fake_send
+        try:
+            result = await autochain.process_due()
+            check("подошедший шаг уходит клиенту",
+                  result["sent"] == 1 and "Молчун" in sent[0][1], f"{result}, {sent}")
+
+            # ответил — остаток снимается
+            talker = db.upsert_contact("tg", "981", "talk", "Говорун", bot_id=bot_id)
+            db.add_message(talker["id"], "in", "client", "привет")
+            autochain.enroll(talker["id"])
+            db.add_message(talker["id"], "in", "client", "и ещё вопрос")
+            before = len(sent)
+            result = await autochain.process_due()
+            check("ответившему цепочка не пишет",
+                  len(sent) == before and result["skipped"] >= 1, f"{result}")
+            reasons = {row["error"] for row in db.q(
+                "SELECT error FROM autochain_jobs WHERE contact_id = ? AND status = 'cancelled'",
+                (talker["id"],))}
+            check("в задании написана причина отмены", "клиент ответил сам" in reasons, str(reasons))
+
+            # передача менеджеру снимает остаток
+            handed = db.upsert_contact("tg", "982", "handed", "Передан", bot_id=bot_id)
+            db.add_message(handed["id"], "in", "client", "нужен человек")
+            autochain.enroll(handed["id"])
+            await sales.hand_off(handed["id"], "проверка", silent=True)
+            left = db.q1("SELECT COUNT(*) AS c FROM autochain_jobs"
+                         " WHERE contact_id = ? AND status = 'pending'", (handed["id"],))["c"]
+            check("после передачи менеджеру шаги сняты", left == 0, f"осталось {left}")
+
+            # зависшее задание возвращается в очередь
+            stuck = db.upsert_contact("tg", "983", "stuck", "Зависший", bot_id=bot_id)
+            db.add_message(stuck["id"], "in", "client", "привет")
+            autochain.enroll(stuck["id"])
+            job = db.q1("SELECT id FROM autochain_jobs WHERE contact_id = ? ORDER BY id",
+                        (stuck["id"],))
+            db.run("UPDATE autochain_jobs SET status = 'processing', claimed_at = ?"
+                   " WHERE id = ?", (db.now() - 3600, job["id"]))
+            autochain._recover_stale()
+            check("зависшее задание возвращается в очередь",
+                  db.q1("SELECT status FROM autochain_jobs WHERE id = ?",
+                        (job["id"],))["status"] == "pending")
+
+            # выключение цепочки снимает ожидающие шаги
+            autochain.set_enabled(chain_id, False)
+            pending = db.q1("SELECT COUNT(*) AS c FROM autochain_jobs"
+                            " WHERE chain_id = ? AND status = 'pending'", (chain_id,))["c"]
+            check("выключенная цепочка ничего не досылает", pending == 0, f"осталось {pending}")
+        finally:
+            autochain.base.send = original
+            autochain.delete_chain(chain_id)
+
+    asyncio.run(chains())
+
     section("Шаблоны и конструктор сценария")
     keys = list(db.SCRIPT_TEMPLATES)
     check("шаблоны сценариев есть", len(keys) >= 3, f"шаблонов {len(keys)}")

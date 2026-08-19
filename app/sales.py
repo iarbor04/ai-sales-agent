@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from . import booking, config, db, llm, notify
+from . import autochain, booking, config, db, llm, notify
 from .channels import base
 
 log = logging.getLogger("sales")
@@ -49,9 +49,17 @@ async def handle_incoming(contact_id: int, text: str, media_type: str | None = N
 
     db.add_message(contact_id, "in", "client", text or None, media_type, media_path)
 
+    # Первое сообщение ставит клиента в автоцепочки: дальше они сработают только
+    # если он замолчит. Считаем по входящим — так работает для любого канала.
+    incoming = db.q1("SELECT COUNT(*) AS c FROM messages"
+                     " WHERE contact_id = ? AND direction = 'in'", (contact_id,))["c"]
+    if incoming == 1:
+        autochain.enroll(contact_id)
+
     # 1. Явный отказ от общения выключает ИИ и рассылки
     if _wants_stop(text):
         db.run("UPDATE contacts SET ai_enabled = 0, opted_in = 0 WHERE id = ?", (contact_id,))
+        autochain.cancel_for(contact_id, "клиент попросил не писать")
         db.add_message(contact_id, "out", "system", "Клиент попросил не писать. ИИ выключен.",
                        is_read=True)
         return
@@ -185,6 +193,9 @@ async def hand_off(contact_id: int, reason: str, summary: str = "",
 
     # обращение в лог: отсюда кнопки «взять в работу» и «передать»
     request_id = db.open_request(contact_id, reason)
+
+    # Дописывать поверх живого менеджера нельзя.
+    autochain.cancel_for(contact_id, "диалог у менеджера")
 
     # silent — когда отправка клиенту уже не удалась, второй раз не пробуем
     if not silent and note:

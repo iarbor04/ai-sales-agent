@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+{% block title %}Автоцепочки · ИИ-продажник{% endblock %}
+{% block body %}
+<div class="topbar">
+  <div style="flex:1">
+    <h1>Автоцепочки</h1>
+    <p class="sub">Догоняющие сообщения для тех, кто написал и замолчал. Ответил —
+      остаток снимается, дальше разговор ведёт агент. Передали менеджеру — тоже снимается.</p>
+  </div>
+  <span class="pill {{ 'ok' if stats.pending else '' }}">ждут отправки: {{ stats.pending }}</span>
+</div>
+
+{% if rows %}
+<div class="card">
+  <h2>Цепочки</h2>
+  <table>
+    <tr><th>Название</th><th>Шагов</th><th>Расписание</th><th>Состояние</th><th></th></tr>
+    {% for row in rows %}
+    <tr>
+      <td><b>{{ row.name }}</b></td>
+      <td>{{ chain_steps.get(row.id) | length }}</td>
+      <td class="small muted">
+        {% for step in chain_steps.get(row.id, []) %}
+        {{ 'через ' ~ step.delay_min ~ ' мин' if step.delay_min else 'сразу' }}{{ ' → ' if not loop.last }}
+        {% endfor %}
+      </td>
+      <td>
+        {% if row.enabled %}<span class="pill ok">включена</span>
+        {% else %}<span class="pill off">выключена</span>{% endif %}
+      </td>
+      <td class="right">
+        <a class="btn ghost small" href="/autochains?edit={{ row.id }}">Изменить</a>
+        <form method="post" action="/autochains/{{ row.id }}/toggle" style="display:inline">
+          <button class="btn ghost small">{{ 'Выключить' if row.enabled else 'Включить' }}</button>
+        </form>
+        <form method="post" action="/autochains/{{ row.id }}/delete" style="display:inline"
+              onsubmit="return confirm('Удалить цепочку «{{ row.name }}»?')">
+          <button class="btn ghost small danger">Удалить</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  <p class="muted small">Отправлено шагов: {{ stats.sent }} · снято, потому что клиент
+    ответил или ушёл к менеджеру: {{ stats.cancelled }}</p>
+</div>
+{% endif %}
+
+<div class="card">
+  <h2>{{ 'Редактирование цепочки' if editing else 'Новая цепочка' }}</h2>
+  <form method="post" action="/autochains" id="chain-form">
+    {% if editing %}<input type="hidden" name="chain_id" value="{{ editing.id }}">{% endif %}
+    <div class="field"><label>Название</label>
+      <input type="text" name="name" value="{{ editing.name if editing else '' }}"
+             placeholder="Прогрев нового лида" required></div>
+
+    <div id="steps">
+      {% for step in editing_steps or [{'delay_min': 60, 'texts': '{}', 'buttons': '[]', 'enabled': 1}] %}
+      {% set texts = step.texts | fromjson %}
+      {% set buttons = step.buttons | fromjson %}
+      {% set step_index = loop.index0 %}
+      <section class="chain-step" data-index="{{ step_index }}">
+        <header>
+          <b>Шаг {{ loop.index }}</b>
+          <label class="check"><input type="checkbox" name="enabled.{{ step_index }}"
+                 {{ 'checked' if step.enabled }}><span>включён</span></label>
+          <label class="step-delay">через
+            <input type="number" name="delay.{{ step_index }}" min="0" max="100000"
+                   value="{{ step.delay_min }}"> мин после предыдущего</label>
+          <button type="button" class="btn ghost small" onclick="this.closest('.chain-step').remove()">×</button>
+        </header>
+        <div class="lang-tabs">
+          {% for code, title in languages %}
+          <button type="button" class="lang-tab {{ 'on' if loop.first }}"
+                  data-lang="{{ code }}">{{ title }}</button>
+          {% endfor %}
+        </div>
+        {% for code, title in languages %}
+        <div class="lang-pane" data-lang="{{ code }}" {{ '' if loop.first else 'hidden' }}>
+          <label class="small muted">Текст — {{ title }}</label>
+          <textarea name="text.{{ step_index }}.{{ code }}"
+            placeholder="{{ 'Что написать молчуну' if code == 'ru' else 'Пусто — уйдёт русский текст' }}">{{ texts.get(code, '') }}</textarea>
+        </div>
+        {% endfor %}
+        <div class="field">
+          <label class="small muted">Кнопки — до трёх</label>
+          {% for index in [0, 1, 2] %}
+          <div class="row cta-row">
+            <input type="text" name="btitle.{{ step_index }}.{{ index }}"
+                   placeholder="Надпись" value="{{ buttons[index].text if buttons | length > index else '' }}">
+            <input type="text" name="burl.{{ step_index }}.{{ index }}"
+                   placeholder="https://..." value="{{ buttons[index].url if buttons | length > index else '' }}">
+          </div>
+          {% endfor %}
+        </div>
+      </section>
+      {% endfor %}
+    </div>
+
+    <div class="row between" style="margin-top:12px">
+      <button class="btn ghost small" type="button" onclick="addStep()">＋ Шаг</button>
+      <button class="btn" type="submit">Сохранить цепочку</button>
+    </div>
+  </form>
+</div>
+
+<script>
+function bindTabs(scope) {
+  scope.querySelectorAll('.lang-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      scope.querySelectorAll('.lang-tab').forEach(t => t.classList.remove('on'));
+      scope.querySelectorAll('.lang-pane').forEach(p => { p.hidden = p.dataset.lang !== tab.dataset.lang; });
+      tab.classList.add('on');
+    });
+  });
+}
+document.querySelectorAll('.chain-step').forEach(bindTabs);
+
+function addStep() {
+  const steps = document.querySelectorAll('.chain-step');
+  if (steps.length >= 5) return;
+  const index = steps.length;
+  const clone = steps[steps.length - 1].cloneNode(true);
+  clone.dataset.index = index;
+  clone.querySelector('header b').textContent = 'Шаг ' + (index + 1);
+  clone.querySelectorAll('input, textarea').forEach(field => {
+    field.name = field.name.replace(/\.\d+(\.|$)/, '.' + index + '$1');
+    if (field.type === 'checkbox') { field.checked = true; return; }
+    if (field.tagName === 'TEXTAREA') field.value = '';
+    else if (field.type !== 'number') field.value = '';
+  });
+  document.getElementById('steps').append(clone);
+  bindTabs(clone);
+}
+</script>
+{% endblock %}

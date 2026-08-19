@@ -8,7 +8,8 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from . import booking, broadcast, config, db, knowledge, retrieval, rivals, sheets
+from . import (autochain, booking, broadcast, config, db, knowledge, retrieval, rivals,
+                sheets)
 
 log = logging.getLogger("scheduler")
 
@@ -17,6 +18,7 @@ _task: asyncio.Task | None = None
 
 async def _tick() -> None:
     await broadcast.due()
+    await autochain.process_due()
     await _sync_sheets()
     await _watch_rivals()
     await _refresh_knowledge()

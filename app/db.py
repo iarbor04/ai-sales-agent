@@ -100,6 +100,41 @@ SCHEMA = [
         ask_field TEXT,
         enabled INTEGER NOT NULL DEFAULT 1
     )""",
+    # Автоцепочки: последовательность сообщений для тех, кто написал и замолчал.
+    """CREATE TABLE IF NOT EXISTS autochains (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        created_at INTEGER NOT NULL
+    )""",
+    """CREATE TABLE IF NOT EXISTS autochain_steps (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        chain_id INTEGER NOT NULL,
+        position INTEGER NOT NULL DEFAULT 0,
+        delay_min INTEGER NOT NULL DEFAULT 60,
+        texts TEXT,
+        buttons TEXT,
+        image_path TEXT,
+        enabled INTEGER NOT NULL DEFAULT 1
+    )""",
+    # Задание на отправку конкретного шага конкретному клиенту.
+    # enrolled_msg_id — номер последнего входящего на момент постановки в
+    # очередь. Сравниваем по номерам, а не по времени: постановка и ответ
+    # укладываются в одну секунду, и по секундам «клиент ответил» не поймать.
+    """CREATE TABLE IF NOT EXISTS autochain_jobs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        chain_id INTEGER NOT NULL,
+        step_id INTEGER NOT NULL,
+        contact_id INTEGER NOT NULL,
+        enrolled_at INTEGER NOT NULL,
+        enrolled_msg_id INTEGER NOT NULL DEFAULT 0,
+        due_at INTEGER NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        attempts INTEGER NOT NULL DEFAULT 0,
+        claimed_at INTEGER,
+        error TEXT,
+        UNIQUE (step_id, contact_id)
+    )""",
     # Этапы воронки. Порядок задаёт position, а не порядок вставки: владелец
     # переставляет этапы в панели.
     """CREATE TABLE IF NOT EXISTS pipeline_stages (
