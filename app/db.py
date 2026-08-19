@@ -403,6 +403,14 @@ DEFAULT_SETTINGS = {
     "kb_extra": "",
     # ключ вставляется в панели; .env остаётся запасным вариантом
     "openrouter_key": "",
+    # какой провайдер отвечает клиентам: openrouter, yandex или gigachat
+    "model_provider": "openrouter",
+    "yandex_api_key": "",
+    "yandex_folder_id": "",
+    "gigachat_client_id": "",
+    "gigachat_client_secret": "",
+    "gigachat_scope": "GIGACHAT_API_PERS",
+    "gigachat_verify_tls": "1",
     # Google Таблицы: база знаний на чтение, лиды на запись
     "sheets_crm_id": "",
     "sheets_crm_tab": "Лиды",

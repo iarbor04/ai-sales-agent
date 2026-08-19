@@ -14,10 +14,10 @@
     <tr><td>Модель</td><td class="right">
       {% if not ai_ready %}<span class="pill warn">нет ключа — агент молчит и зовёт менеджера</span>
       {% elif key_check and key_check.ok %}<span class="pill ok">ключ работает — {{ key_source }}</span>
-      {% else %}<span class="pill bad">ключ не принят OpenRouter</span>{% endif %}</td></tr>
+      {% else %}<span class="pill bad">{{ provider_title }} не принял доступ</span>{% endif %}</td></tr>
     {% if ai_ready and key_check and not key_check.ok %}
     <tr><td colspan="2" class="small" style="color:var(--danger)">
-      OpenRouter: {{ key_check.detail }}. Пока ключ не принят, агент не отвечает
+      {{ provider_title }}: {{ key_check.detail }}. Пока ключ не принят, агент не отвечает
       клиентам и передаёт каждый диалог менеджеру.</td></tr>
     {% endif %}
     <tr><td>Режим приёма</td><td class="right"><span class="pill">{{ mode }}</span></td></tr>
@@ -63,20 +63,48 @@
   <div class="card">
     <h2>Модель</h2>
     <div class="field">
-      <label>Ключ OpenRouter</label>
-      <input type="password" name="openrouter_key" autocomplete="off" data-lpignore="true"
-        placeholder="{% if ai_ready %}ключ сохранён — впишите новый, чтобы заменить{% else %}sk-or-v1-...{% endif %}">
-      <span class="muted small">
-        Взять на openrouter.ai → Keys. Сам ключ не показываем — только заменяем.
-        {% if ai_ready %}Сейчас: {{ key_source }}.{% endif %}
-      </span>
+      <label>Кто отвечает клиентам</label>
+      <div class="lang-tabs">
+        {% for item in providers %}
+        <button type="button" class="lang-tab provider-tab {{ 'on' if provider == item.name }}"
+                data-provider="{{ item.name }}">
+          {{ item.title }}{% if item.configured %}<i class="filled"></i>{% endif %}
+        </button>
+        {% endfor %}
+      </div>
+      <input type="hidden" name="model_provider" id="model-provider" value="{{ provider }}">
     </div>
-    {% if ai_ready %}
-    <label class="check">
-      <input type="checkbox" name="drop_key">
-      <span>удалить сохранённый ключ</span>
-    </label>
-    {% endif %}
+
+    {% for item in providers %}
+    <div class="provider-pane" data-provider="{{ item.name }}"
+         {{ '' if provider == item.name else 'hidden' }}>
+      <p class="note">{{ item.help }}</p>
+      {% for field in item.fields %}
+      <div class="field">
+        <label>{{ field.label }}</label>
+        <input type="{{ 'password' if field.secret else 'text' }}" name="{{ field.key }}"
+               autocomplete="off" data-lpignore="true"
+               value="{{ '' if field.secret else values.get(field.key, '') }}"
+               placeholder="{% if field.secret and values.get(field.key) %}сохранено — впишите новое, чтобы заменить{% else %}{{ field.hint }}{% endif %}">
+      </div>
+      {% endfor %}
+      {% if item.name == 'gigachat' %}
+      <label class="check">
+        <input type="checkbox" name="gigachat_insecure"
+               {{ 'checked' if values.get('gigachat_verify_tls') == '0' }}>
+        <span>не проверять сертификат</span>
+      </label>
+      <p class="note">Сертификат GigaChat подписан НУЦ Минцифры. Если на сервере нет
+        его корневых сертификатов, запрос падает на проверке TLS — тогда либо
+        поставьте сертификаты, либо снимите галочку проверки здесь.</p>
+      {% endif %}
+      {% if item.name == 'openrouter' and ai_ready and provider == 'openrouter' %}
+      <label class="check"><input type="checkbox" name="drop_key">
+        <span>удалить сохранённый ключ</span></label>
+      {% endif %}
+    </div>
+    {% endfor %}
+    {% if ai_ready %}<p class="note">Доступ к {{ provider_title }}: {{ key_source }}.</p>{% endif %}
     <div class="field">
       <label>Модель для ответов</label>
       <select name="model" id="mselect">
@@ -167,6 +195,18 @@
 </form>
 
 <script>
+// Вкладки провайдера: показываем поля только выбранного, остальные не мешают.
+document.querySelectorAll('.provider-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.provider-tab').forEach(t => t.classList.remove('on'));
+    document.querySelectorAll('.provider-pane').forEach(pane => {
+      pane.hidden = pane.dataset.provider !== tab.dataset.provider;
+    });
+    tab.classList.add('on');
+    document.getElementById('model-provider').value = tab.dataset.provider;
+  });
+});
+
 // Список моделей у OpenRouter длинный, но грузим его целиком: владельцу
 // нужен именно выбор, а не наш короткий список «рекомендованного».
 async function loadModels() {

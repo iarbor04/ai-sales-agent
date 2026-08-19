@@ -1,4 +1,7 @@
-"""Модель через OpenRouter.
+"""Разговор с моделью: промпт, разбор ответа, решение о передаче человеку.
+
+Провайдер выбирается в настройках — OpenRouter, YandexGPT или GigaChat, — и
+живёт в app/providers/. Этому модулю всё равно, чей API за ним.
 
 Один вызов делает всю работу за раз: пишет ответ клиенту, вытаскивает поля
 лида и решает, пора ли звать человека. Три отдельных запроса стоили бы втрое
@@ -8,7 +11,7 @@
 Без ключа модуль не падает — он возвращает пустой результат с флагом
 handoff, и диалог уходит менеджеру. Это поведение из ТЗ: модель недоступна —
 передать разговор человеку. Причина отказа при этом сохраняется дословно:
-менеджер должен видеть «OpenRouter отклонил ключ (401)», а не догадываться.
+менеджер должен видеть «OpenRouter отклонил доступ (401)», а не догадываться.
 """
 from __future__ import annotations
 
@@ -16,27 +19,16 @@ import json
 import logging
 import time
 
-import httpx
-
-from . import config, db, retrieval
+from . import db, providers, retrieval
+from .providers import base
 
 log = logging.getLogger("llm")
 
-API_URL = "https://openrouter.ai/api/v1/chat/completions"
-MODELS_URL = "https://openrouter.ai/api/v1/models"
-KEY_URL = "https://openrouter.ai/api/v1/key"
-
-
-class LLMError(RuntimeError):
-    """Понятная причина, почему модель не ответила.
-
-    Текст этой ошибки уходит менеджеру в уведомление и в журнал обращений,
-    поэтому он написан для человека, а не для разработчика.
-    """
-
-
-class LLMTruncated(LLMError):
-    """Ответ обрезан лимитом токенов — значит, JSON пришёл неполным."""
+# Провайдер выбирается в настройках: OpenRouter, YandexGPT или GigaChat.
+# Здесь остаются промпт, разбор ответа и повторные попытки — они одинаковы для
+# всех, а транспорт живёт в app/providers/.
+LLMError = base.LLMError
+LLMTruncated = base.LLMTruncated
 
 
 # Рассуждающие модели тратят на размышления тот же бюджет, что и на ответ:
@@ -45,11 +37,6 @@ class LLMTruncated(LLMError):
 # использованное, поэтому запас ничего не стоит.
 ANSWER_TOKENS = 2500
 SUMMARY_TOKENS = 800
-
-# Глубокие размышления в заполнении шаблона ответа не нужны и только съедают
-# бюджет. Параметр понимают и OpenAI, и Anthropic, и Google, и DeepSeek;
-# модели без рассуждений его просто игнорируют.
-REASONING = {"effort": "low"}
 
 # Напоминание для второй попытки: слабые модели забывают про формат.
 JSON_REMINDER = (
@@ -72,89 +59,27 @@ ANSWER_SCHEMA = """{
 }"""
 
 
-def api_key() -> str:
-    """Ключ из панели, а если там пусто — из .env.
-
-    Владельцу удобнее вставить ключ в Настройках, чем лезть в файл на сервере,
-    поэтому панель главнее. Ключ используется в каждом запросе заново, так что
-    его смена работает сразу, без перезапуска службы.
-    """
-    return (db.setting("openrouter_key", "").strip() or config.OPENROUTER_API_KEY).strip()
+def provider():
+    return providers.current()
 
 
 def ai_ready() -> bool:
-    return bool(api_key())
+    """Доступ к модели настроен. У каждого провайдера свой набор полей."""
+    return provider().configured()
 
 
 def current_model() -> str:
-    return db.setting("model", config.OPENROUTER_MODEL) or config.OPENROUTER_MODEL
+    active = provider()
+    return db.setting("model", active.DEFAULT_MODEL) or active.DEFAULT_MODEL
 
 
 async def available_models() -> list[dict]:
-    """Список моделей OpenRouter для выпадающего списка в Настройках."""
-    if not ai_ready():
-        return []
+    """Список моделей выбранного провайдера — для выпадающего списка в панели."""
     try:
-        async with httpx.AsyncClient(timeout=20) as client:
-            resp = await client.get(
-                MODELS_URL,
-                headers={"Authorization": f"Bearer {api_key()}"},
-            )
-            resp.raise_for_status()
-            data = resp.json().get("data", [])
-    except Exception as exc:  # noqa: BLE001
+        return await provider().models()
+    except Exception as exc:  # noqa: BLE001 — список моделей не критичен
         log.warning("список моделей недоступен: %s", exc)
         return []
-
-    models = [
-        {"id": item.get("id", ""), "name": item.get("name", item.get("id", ""))}
-        for item in data
-        if item.get("id")
-    ]
-    models.sort(key=lambda m: m["id"])
-    return models
-
-
-def _error_text(resp: httpx.Response) -> str:
-    """Что именно ответил OpenRouter.
-
-    Одного кода состояния мало: 401 при отозванном ключе и 401 при ключе от
-    другого аккаунта выглядят одинаково, а сообщение провайдера их различает.
-    """
-    try:
-        body = resp.json()
-    except ValueError:
-        return resp.text.strip()[:200]
-    if isinstance(body, dict):
-        error = body.get("error")
-        if isinstance(error, dict) and error.get("message"):
-            return _tidy(str(error["message"]))
-        if isinstance(error, str):
-            return _tidy(error)
-    return _tidy(resp.text)
-
-
-def _tidy(detail: str) -> str:
-    """Без хвостовой точки: текст подставляется в середину предложения."""
-    return detail.strip().rstrip(".").strip()[:200]
-
-
-def _failure(status: int, detail: str, model: str) -> str:
-    detail = (detail or "").strip()
-    tail = f": {detail}" if detail else ""
-    if status == 401:
-        return f"OpenRouter отклонил ключ (401){tail or ': ключ недействителен или отозван'}"
-    if status == 402:
-        return f"на счёте OpenRouter нет средств (402){tail}"
-    if status == 403:
-        return f"OpenRouter запретил запрос (403){tail}"
-    if status == 404:
-        return f"модель «{model}» недоступна по этому ключу (404){tail}"
-    if status == 429:
-        return f"OpenRouter ограничил частоту запросов (429){tail}"
-    if status >= 500:
-        return f"OpenRouter временно недоступен ({status}){tail}"
-    return f"OpenRouter вернул ошибку {status}{tail}"
 
 
 async def _call(system: str, user: str, max_tokens: int = ANSWER_TOKENS,
@@ -165,61 +90,13 @@ async def _call(system: str, user: str, max_tokens: int = ANSWER_TOKENS,
     «модель недоступна» — по этой фразе нельзя отличить отозванный ключ от
     пустого счёта или недоступной модели.
     """
-    key = api_key()
+    active = provider()
     model = current_model()
-    if not key:
-        raise LLMError("не задан ключ OpenRouter")
-    payload = {
-        "model": model,
-        "max_tokens": max_tokens,
-        "reasoning": REASONING,
-        "messages": [
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ],
-    }
-    try:
-        async with httpx.AsyncClient(timeout=60) as client:
-            resp = await client.post(
-                API_URL,
-                headers={
-                    "Authorization": f"Bearer {key}",
-                    "Content-Type": "application/json",
-                },
-                json=payload,
-            )
-    except httpx.TimeoutException as exc:
-        raise LLMError("OpenRouter не ответил вовремя") from exc
-    except httpx.HTTPError as exc:
-        raise LLMError(f"не удалось связаться с OpenRouter: {exc}") from exc
-
-    if resp.status_code >= 400:
-        reason = _failure(resp.status_code, _error_text(resp), model)
-        log.error("запрос к модели не прошёл — %s", reason)
-        raise LLMError(reason)
-
-    try:
-        body = resp.json()
-    except ValueError as exc:
-        raise LLMError("OpenRouter вернул не-JSON") from exc
-
-    # OpenRouter умеет отвечать 200 с телом-ошибкой — это тоже отказ.
-    error = body.get("error") if isinstance(body, dict) else None
-    if error:
-        detail = error.get("message") if isinstance(error, dict) else str(error)
-        code = error.get("code") if isinstance(error, dict) else None
-        reason = _failure(int(code) if isinstance(code, int) else 400, str(detail or ""), model)
-        log.error("запрос к модели не прошёл — %s", reason)
-        raise LLMError(reason)
-
-    choices = body.get("choices") or []
-    if not choices:
-        raise LLMError(f"модель «{model}» вернула пустой ответ")
-    text = (choices[0].get("message", {}).get("content") or "").strip()
+    text, finish = await active.complete(system, user, model, max_tokens)
 
     # Обрезанный ответ выглядел как «модель ответила не по формату», и владелец
     # искал причину в модели, а не в лимите.
-    if strict and choices[0].get("finish_reason") == "length":
+    if strict and finish == "length":
         raise LLMTruncated(
             f"ответ модели «{model}» не поместился в лимит {max_tokens} токенов")
     if not text:
@@ -241,39 +118,17 @@ async def check_key(force: bool = False) -> dict:
     меняется редко. Кнопка проверки просит свежий ответ через force.
     """
     global _key_cache
-    key = api_key()
-    if not key:
-        return {"ok": False, "detail": "ключ не задан"}
+    active = provider()
+    if not active.configured():
+        return {"ok": False, "detail": f"доступ к {active.TITLE} не настроен"}
+    # ключом кеша служит имя провайдера вместе с его полями: сменили — проверим заново
+    key = active.NAME + "|" + "|".join(db.setting(field[0], "") for field in active.FIELDS)
     now = time.monotonic()
     if not force and _key_cache and _key_cache[0] == key and now - _key_cache[1] < KEY_CACHE_SECONDS:
         return _key_cache[2]
-    result = await _probe_key(key)
+    result = await provider().check_credentials()
     _key_cache = (key, now, result)
     return result
-
-
-async def _probe_key(key: str) -> dict:
-    try:
-        async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.get(KEY_URL, headers={"Authorization": f"Bearer {key}"})
-    except httpx.HTTPError as exc:
-        return {"ok": False, "detail": f"OpenRouter недоступен: {exc}"}
-
-    if resp.status_code >= 400:
-        return {"ok": False, "detail": _failure(resp.status_code, _error_text(resp), current_model())}
-
-    data = {}
-    try:
-        data = (resp.json() or {}).get("data") or {}
-    except ValueError:
-        pass
-    detail = "ключ принят OpenRouter"
-    limit, usage = data.get("limit"), data.get("usage")
-    if limit is not None:
-        detail += f", лимит {limit}, потрачено {usage or 0}"
-    elif usage is not None:
-        detail += f", потрачено {usage}"
-    return {"ok": True, "detail": detail}
 
 
 async def check_model() -> dict:

@@ -28,7 +28,7 @@ from itsdangerous import BadSignature, URLSafeSerializer
 
 from .. import (
     autochain, booking, broadcast, config, db, healthcheck, knowledge, llm,
-    onboarding, pricefile, retrieval, rivals, sales, scheduler, sheets,
+    onboarding, pricefile, providers, retrieval, rivals, sales, scheduler, sheets,
 )
 from .. import channels
 from ..channels import base, telegram, whatsapp
@@ -670,6 +670,9 @@ async def settings_page(request: Request):
     ]
     return page(request, "settings.html", values=values,
                 models=await llm.available_models(),
+                providers=providers.options(),
+                provider=providers.current().NAME,
+                provider_title=providers.current().TITLE,
                 connections=connections,
                 health=healthcheck.last(),
                 telegram_on=channels.telegram_enabled(),
@@ -707,12 +710,8 @@ async def settings_ai_check():
 
 
 def _key_source() -> str:
-    """Откуда взялся ключ — чтобы владелец видел, что он вообще есть."""
-    if db.setting("openrouter_key", "").strip():
-        return "вставлен в панели"
-    if config.OPENROUTER_API_KEY:
-        return "взят из .env"
-    return ""
+    """Откуда взялся доступ — чтобы владелец видел, что он вообще есть."""
+    return providers.current().source()
 
 
 async def read_site(site: str) -> dict:
@@ -749,6 +748,17 @@ async def settings_save(request: Request):
 
     # Ключ пишем только если поле заполнили: пустое поле означает
     # «оставить как было», иначе ключ стирался бы при каждом сохранении.
+    # Провайдер модели и его поля. У каждого свой набор, поэтому пишем только
+    # то, что пришло, а пустое поле означает «оставить как было» — иначе
+    # сохранение настроек стирало бы доступ.
+    chosen = str(form.get("model_provider") or "").strip()
+    previous_provider = db.setting("model_provider", providers.DEFAULT)
+    if chosen and chosen in {item["name"] for item in providers.options()}:
+        db.set_setting("model_provider", chosen)
+        if chosen != previous_provider:
+            # у провайдеров разные имена моделей: старое здесь бессмысленно
+            db.set_setting("model", providers.get(chosen).DEFAULT_MODEL)
+
     raw_key = str(form.get("openrouter_key") or "")
     new_key = _clean_key(raw_key)
     if raw_key.strip() and not _key_looks_real(new_key):
@@ -762,6 +772,16 @@ async def settings_save(request: Request):
     if form.get("drop_key"):
         db.set_setting("openrouter_key", "")
 
+    for field in ("yandex_api_key", "yandex_folder_id",
+                  "gigachat_client_id", "gigachat_client_secret", "gigachat_scope"):
+        value = str(form.get(field) or "").strip()
+        if value:
+            db.set_setting(field, "".join(value.split()))
+    db.set_setting("gigachat_verify_tls", "0" if form.get("gigachat_insecure") else "1")
+    if any(form.get(field) for field in ("gigachat_client_id", "gigachat_client_secret",
+                                         "gigachat_scope")) or form.get("gigachat_insecure"):
+        providers.gigachat.forget_token()
+
     db.set_setting("ai_enabled_global", "1" if form.get("ai_enabled_global") else "0")
 
     site = str(form.get("business_site") or "").strip()
@@ -773,7 +793,8 @@ async def settings_save(request: Request):
 
     # Новый ключ проверяем сразу: узнать об отказе через неделю по молчащему
     # агенту — худший из возможных вариантов.
-    if new_key:
+    if new_key or chosen != previous_provider or any(
+            form.get(field) for field in ("yandex_api_key", "gigachat_client_secret")):
         check = await llm.check_key(force=True)
         return RedirectResponse(
             "/settings?" + ("ok=" if check["ok"] else "error=") + quote(check["detail"] + site_note),

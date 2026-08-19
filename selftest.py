@@ -18,6 +18,7 @@ import os
 import pathlib
 import sys
 import tempfile
+import time
 
 # работаем на временной базе, чтобы не задеть боевую
 _tmp = tempfile.mkdtemp(prefix="selftest-")
@@ -410,20 +411,178 @@ def main() -> int:
 
     asyncio.run(behaviour())
 
+    section("Провайдеры модели")
+
+    def stub_server(handler):
+        """Локальная заглушка провайдера: отдаёт то, что вернёт handler(path, body)."""
+        import http.server
+        import json as _json
+        import threading
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+
+            def _reply(self):
+                length = int(self.headers.get("content-length") or 0)
+                raw = self.rfile.read(length).decode() if length else ""
+                code, body = handler(self.path, raw)
+                payload = _json.dumps(body).encode()
+                self.send_response(code)
+                self.send_header("content-type", "application/json")
+                self.send_header("content-length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+
+            do_POST = _reply
+            do_GET = _reply
+
+        server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        return server
+
+    async def model_providers() -> None:
+        from app import llm, providers
+        from app.providers import gigachat, yandex
+
+        check("провайдеров трое", {p.NAME for p in providers.ALL}
+              == {"openrouter", "yandex", "gigachat"})
+        check("неизвестное имя не роняет панель", providers.get("что-то").NAME == "openrouter")
+
+        # ── YandexGPT: свой формат запроса и ответа ──
+        seen = {}
+
+        def yandex_handler(path, raw):
+            import json as _json
+            seen["body"] = _json.loads(raw or "{}")
+            return 200, {"result": {"alternatives": [
+                {"message": {"role": "assistant", "text": "Ок"},
+                 "status": "ALTERNATIVE_STATUS_FINAL"}]}}
+
+        server = stub_server(yandex_handler)
+        original = yandex.API_URL
+        yandex.API_URL = f"http://127.0.0.1:{server.server_port}/completion"
+        db.set_setting("model_provider", "yandex")
+        db.set_setting("yandex_api_key", "AQVN-test")
+        db.set_setting("yandex_folder_id", "b1gtest")
+        db.set_setting("model", "yandexgpt-lite/latest")
+        try:
+            check("YandexGPT настроен и выбран",
+                  llm.ai_ready() and llm.provider().NAME == "yandex")
+            text = await llm._call("система", "вопрос", max_tokens=100)
+            check("YandexGPT отвечает через общий вызов", text == "Ок", text)
+            check("каталог подставляется в modelUri",
+                  seen["body"]["modelUri"] == "gpt://b1gtest/yandexgpt-lite/latest",
+                  seen["body"].get("modelUri"))
+            check("сообщения уходят в формате Яндекса",
+                  seen["body"]["messages"][0].get("text") == "система", str(seen["body"])[:80])
+
+            # обрезку Яндекс сообщает статусом, а не finish_reason
+            server.shutdown()
+            server = stub_server(lambda path, raw: (200, {"result": {"alternatives": [
+                {"message": {"text": "начало"}, "status": "ALTERNATIVE_STATUS_TRUNCATED_FINAL"}]}}))
+            yandex.API_URL = f"http://127.0.0.1:{server.server_port}/completion"
+            try:
+                await llm._call("система", "вопрос", max_tokens=10)
+                outcome = "обрезку не заметили"
+            except llm.LLMTruncated:
+                outcome = ""
+            check("обрезанный ответ Яндекса распознан", not outcome, outcome)
+
+            # без каталога запрос собрать нельзя — говорим об этом прямо
+            db.set_setting("yandex_folder_id", "")
+            try:
+                await llm._call("система", "вопрос")
+                outcome = "запрос ушёл без каталога"
+            except llm.LLMError as exc:
+                outcome = "" if "каталог" in str(exc) else str(exc)
+            check("без каталога Яндекс объясняет, чего не хватает", not outcome, outcome)
+        finally:
+            server.shutdown()
+            yandex.API_URL = original
+            db.set_setting("yandex_folder_id", "b1gtest")
+
+        # ── GigaChat: токен на полчаса, обновление при 401 ──
+        calls = {"oauth": 0, "chat": 0}
+
+        def giga_handler(path, raw):
+            if "oauth" in path:
+                calls["oauth"] += 1
+                return 200, {"access_token": f"token-{calls['oauth']}",
+                             "expires_at": int((time.time() + 1800) * 1000)}
+            calls["chat"] += 1
+            if calls["chat"] == 2:  # имитируем истёкший раньше срока токен
+                return 401, {"message": "Unauthorized"}
+            return 200, {"choices": [{"finish_reason": "stop",
+                                      "message": {"content": "Готово"}}]}
+
+        server = stub_server(giga_handler)
+        oauth_url, api_url = gigachat.OAUTH_URL, gigachat.API_URL
+        gigachat.OAUTH_URL = f"http://127.0.0.1:{server.server_port}/api/v2/oauth"
+        gigachat.API_URL = f"http://127.0.0.1:{server.server_port}/chat/completions"
+        db.set_setting("model_provider", "gigachat")
+        db.set_setting("gigachat_client_id", "id-test")
+        db.set_setting("gigachat_client_secret", "secret-test")
+        db.set_setting("model", "GigaChat")
+        gigachat.forget_token()
+        try:
+            check("GigaChat настроен и выбран",
+                  llm.ai_ready() and llm.provider().NAME == "gigachat")
+            first = await llm._call("система", "вопрос", max_tokens=100)
+            check("GigaChat отвечает через общий вызов", first == "Готово", first)
+            check("токен берётся один раз", calls["oauth"] == 1, f"запросов токена {calls['oauth']}")
+            second = await llm._call("система", "вопрос", max_tokens=100)
+            check("на 401 токен обновляется и запрос повторяется",
+                  second == "Готово" and calls["oauth"] == 2,
+                  f"токенов {calls['oauth']}, чатов {calls['chat']}")
+            checked = await gigachat.check_credentials()
+            check("проверка пары доступа проходит", checked["ok"], str(checked))
+        finally:
+            server.shutdown()
+            gigachat.OAUTH_URL, gigachat.API_URL = oauth_url, api_url
+            gigachat.forget_token()
+
+        # смена провайдера меняет модель на его собственную
+        from app.web import main as web
+        db.set_setting("model_provider", "openrouter")
+        db.set_setting("model", "GigaChat")
+        db.set_setting("model_provider", "yandex")
+        db.set_setting("model", providers.get("yandex").DEFAULT_MODEL)
+        check("у каждого провайдера своя модель по умолчанию",
+              providers.get("yandex").DEFAULT_MODEL != providers.get("openrouter").DEFAULT_MODEL
+              != providers.get("gigachat").DEFAULT_MODEL)
+        check("панель знает про поля всех провайдеров",
+              all(item["fields"] for item in providers.options())
+              and any(f["key"] == "yandex_folder_id" for f in providers.options()[1]["fields"]))
+
+        db.set_setting("model_provider", "openrouter")
+        db.set_setting("model", "openai/gpt-4o-mini")
+        db.set_setting("yandex_api_key", "")
+        db.set_setting("gigachat_client_id", "")
+        db.set_setting("gigachat_client_secret", "")
+
+    asyncio.run(model_providers())
+
     section("Отказ модели объясняется")
     import httpx
 
     from app import llm
 
+    from app.providers import base as provider_base
+
+    def failure(status, detail="", model="gpt"):
+        return provider_base.human_error("OpenRouter", status, detail, model)
+
     check("401 говорит про ключ",
-          "401" in llm._failure(401, "", "gpt") and "ключ" in llm._failure(401, "", "gpt").lower())
-    check("ответ OpenRouter попадает в текст",
-          "User not found" in llm._failure(401, "User not found", "gpt"))
-    check("402 говорит про счёт", "средств" in llm._failure(402, "", "gpt"))
-    check("404 называет модель", "«gpt»" in llm._failure(404, "", "gpt"))
-    check("429 говорит про частоту", "429" in llm._failure(429, "", "gpt"))
+          "401" in failure(401) and "ключ" in failure(401).lower())
+    check("ответ провайдера попадает в текст",
+          "User not found" in failure(401, "User not found"))
+    check("402 говорит про счёт", "средств" in failure(402))
+    check("404 называет модель", "«gpt»" in failure(404))
+    check("429 говорит про частоту", "429" in failure(429))
     check("сообщение об ошибке читается из тела ответа",
-          llm._error_text(httpx.Response(401, json={"error": {"message": "User not found"}}))
+          provider_base.error_text(
+              httpx.Response(401, json={"error": {"message": "User not found"}}))
           == "User not found")
 
     from app.web import main as web
@@ -474,8 +633,9 @@ def main() -> int:
         cut = '{"reply": "У нас есть панама «Havana», цена 6720'
         whole = '{"reply": "У нас есть панама «Havana», 6720 ₽.", "handoff": false, "fields": {}}'
         server, state = truncating_server([reply_body(cut, "length"), reply_body(whole)])
-        original_url = llm.API_URL
-        llm.API_URL = f"http://127.0.0.1:{server.server_port}/chat"
+        from app.providers import openrouter
+        original_url = openrouter.API_URL
+        openrouter.API_URL = f"http://127.0.0.1:{server.server_port}/chat"
         try:
             person = db.upsert_contact("tg", "906", "cut", "Обрыв", bot_id=bot_id)
             result = await llm.answer(person["id"], "что у вас есть")
@@ -487,7 +647,7 @@ def main() -> int:
             # обрыв дважды — причина должна называть лимит, а не формат
             server.shutdown()
             server, state = truncating_server([reply_body(cut, "length")])
-            llm.API_URL = f"http://127.0.0.1:{server.server_port}/chat"
+            openrouter.API_URL = f"http://127.0.0.1:{server.server_port}/chat"
             result = await llm.answer(person["id"], "что у вас есть")
             check("если обрыв повторился, причина называет лимит токенов",
                   result["handoff"] and "лимит" in result["handoff_reason"],
@@ -498,7 +658,7 @@ def main() -> int:
             summary = await llm.summarize(person["id"])
             check("обрезанное резюме не выбрасывается", summary.startswith("{\"reply\""), repr(summary))
         finally:
-            llm.API_URL = original_url
+            openrouter.API_URL = original_url
             server.shutdown()
             db.set_setting("openrouter_key", "")
             db.set_setting("model", "openai/gpt-4o-mini")
