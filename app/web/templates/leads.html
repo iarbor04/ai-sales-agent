@@ -2,21 +2,87 @@
 {% block title %}Лиды · ИИ-продажник{% endblock %}
 {% block body %}
 <div class="topbar">
-  <h1>Лиды</h1>
-  <div class="tabs">
-    <a href="/leads" class="{{ 'on' if not current }}">все</a>
-    {% for key, label in statuses.items() %}
-    <a href="/leads?status={{ key }}" class="{{ 'on' if current == key }}">{{ label }}</a>
-    {% endfor %}
+  <div style="flex:1">
+    <h1>Лиды</h1>
+    <p class="sub">Карточка заводится сама, когда агент соберёт пару полей о клиенте.
+      Перетащите карточку, чтобы сменить этап.</p>
   </div>
+  <div class="tabs">
+    <a href="/leads" class="{{ 'on' if view == 'board' }}">доска</a>
+    <a href="/leads?view=table" class="{{ 'on' if view == 'table' }}">список</a>
+  </div>
+  <button class="btn ghost small" type="button" onclick="toggleStages()">Настроить воронку</button>
 </div>
 
+<section class="card" id="stage-editor" hidden>
+  <h2>Этапы воронки</h2>
+  <p class="lead-text">Порядок колонок — порядок строк. «Передача» — этап, куда
+    агент кладёт лида, когда зовёт менеджера; «финальный» исключается из рассылок.</p>
+  <form method="post" action="/leads/stages">
+    <table>
+      <tr><th style="width:150px">Идентификатор</th><th>Название</th>
+          <th style="width:120px">Цвет</th><th style="width:90px">Передача</th>
+          <th style="width:90px">Финальный</th><th style="width:60px"></th></tr>
+      {% for stage in stages %}
+      <tr class="stage-row">
+        <td><input type="text" name="id.{{ loop.index0 }}" value="{{ stage.id }}"
+                   pattern="[a-z0-9-]{1,32}" required></td>
+        <td><input type="text" name="title.{{ loop.index0 }}" value="{{ stage.title }}"
+                   maxlength="40" required></td>
+        <td>
+          <select name="color.{{ loop.index0 }}">
+            {% for color in colors %}
+            <option value="{{ color }}" {{ 'selected' if stage.color == color }}>{{ color }}</option>
+            {% endfor %}
+          </select>
+        </td>
+        <td><input type="radio" name="system" value="{{ loop.index0 }}"
+                   {{ 'checked' if stage.is_system }}></td>
+        <td><input type="radio" name="won" value="{{ loop.index0 }}"
+                   {{ 'checked' if stage.is_won }}></td>
+        <td><button class="btn ghost small" type="button"
+                    onclick="this.closest('tr').remove()">×</button></td>
+      </tr>
+      {% endfor %}
+    </table>
+    <div class="row between" style="margin-top:12px">
+      <button class="btn ghost small" type="button" onclick="addStage()">＋ Этап</button>
+      <button class="btn" type="submit">Сохранить воронку</button>
+    </div>
+  </form>
+</section>
+
+{% if view == 'board' %}
+<div class="board">
+  {% for stage in stages %}
+  <section class="board-col" data-stage="{{ stage.id }}">
+    <header>
+      <span class="dot {{ stage.color }}"></span>
+      <b>{{ stage.title }}</b>
+      <span class="count">{{ board.get(stage.id) | length }}</span>
+    </header>
+    <div class="board-drop">
+      {% for r in board.get(stage.id, []) %}
+      <article class="lead-card" draggable="true" data-contact="{{ r.cid }}">
+        <a href="/dialogs?c={{ r.cid }}">{{ r.name or r.contact_name or r.username or r.phone or 'id' ~ r.cid }}</a>
+        <div class="lead-meta">{{ chan(r.channel) }}{% if r.manager %}<span class="who">{{ r.manager }}</span>{% endif %}</div>
+        {% if r.product %}<div class="small">{{ r.product | short(40) }}</div>{% endif %}
+        {% if r.summary %}<p class="small muted">{{ r.summary | short(90) }}</p>{% endif %}
+        <time class="small muted">{{ r.updated_at | dt }}</time>
+      </article>
+      {% endfor %}
+      {% if not board.get(stage.id) %}<p class="board-empty">перетащите лида сюда</p>{% endif %}
+    </div>
+  </section>
+  {% endfor %}
+</div>
+{% else %}
 <div class="card">
   {% if rows %}
   <table>
     <tr>
       <th>Клиент</th><th>Канал</th><th>Продукт</th><th>Потребность</th>
-      <th>Срок</th><th>Статус</th><th>Менеджер</th><th>Обновлён</th>
+      <th>Срок</th><th>Этап</th><th>Менеджер</th><th>Обновлён</th>
     </tr>
     {% for r in rows %}
     <tr>
@@ -28,19 +94,65 @@
       <td>{{ r.product or '—' }}</td>
       <td>{{ r.need | short(40) or '—' }}</td>
       <td>{{ r.deadline or '—' }}</td>
-      <td>
-        <span class="pill {{ 'warn' if r.status == 'handed' else 'ok' if r.status == 'qualifying' }}">
-          {{ statuses[r.status] }}
-        </span>
-      </td>
+      <td><span class="pill {{ 'warn' if r.status == system_stage else 'ok' }}">
+        {{ statuses.get(r.status, r.status) }}</span></td>
       <td class="small">{{ r.manager or '—' }}</td>
       <td class="small muted">{{ r.updated_at | dt }}</td>
     </tr>
     {% endfor %}
   </table>
   {% else %}
-  <p class="muted">Лидов пока нет. Карточка заводится сама, когда агент соберёт
-    хотя бы пару полей о клиенте.</p>
+  <p class="muted">Лидов пока нет.</p>
   {% endif %}
 </div>
+{% endif %}
+
+<script>
+function toggleStages() {
+  const box = document.getElementById('stage-editor');
+  box.hidden = !box.hidden;
+  if (!box.hidden) box.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+}
+
+function addStage() {
+  const rows = document.querySelectorAll('#stage-editor .stage-row');
+  if (rows.length >= 8) return;
+  const clone = rows[rows.length - 1].cloneNode(true);
+  const index = rows.length;
+  clone.querySelectorAll('input, select').forEach(field => {
+    if (field.type === 'radio') { field.value = index; field.checked = false; return; }
+    field.name = field.name.replace(/\.\d+$/, '.' + index);
+    if (field.tagName === 'INPUT') field.value = field.name.startsWith('id.') ? 'stage-' + (index + 1) : 'Новый этап';
+  });
+  rows[rows.length - 1].after(clone);
+}
+
+// Перетаскивание карточки между колонками. Этап сохраняется сразу, без кнопки:
+// лишний шаг «не забудьте нажать сохранить» тут только мешает.
+let dragged = null;
+document.querySelectorAll('.lead-card').forEach(card => {
+  card.addEventListener('dragstart', () => { dragged = card; card.classList.add('dragging'); });
+  card.addEventListener('dragend', () => { card.classList.remove('dragging'); });
+});
+document.querySelectorAll('.board-col').forEach(column => {
+  const drop = column.querySelector('.board-drop');
+  column.addEventListener('dragover', event => { event.preventDefault(); column.classList.add('over'); });
+  column.addEventListener('dragleave', () => column.classList.remove('over'));
+  column.addEventListener('drop', async event => {
+    event.preventDefault();
+    column.classList.remove('over');
+    if (!dragged) return;
+    const stage = column.dataset.stage;
+    const contact = dragged.dataset.contact;
+    drop.querySelector('.board-empty')?.remove();
+    drop.append(dragged);
+    const body = new URLSearchParams({stage});
+    const resp = await fetch(`/leads/${contact}/stage`, {method: 'POST', body});
+    if (!resp.ok) location.reload();
+    document.querySelectorAll('.board-col').forEach(c => {
+      c.querySelector('.count').textContent = c.querySelectorAll('.lead-card').length;
+    });
+  });
+});
+</script>
 {% endblock %}

@@ -9,6 +9,7 @@
 """
 from __future__ import annotations
 
+import re
 import sqlite3
 import threading
 import time
@@ -55,12 +56,18 @@ def now() -> int:
 
 # ── схема ──────────────────────────────────────────────────────────────
 
-# Статусы лида из ТЗ. Ключи в базе, подписи в интерфейсе.
-LEAD_STATUSES = {
-    "new": "Новый лид",
-    "qualifying": "Квалификация",
-    "handed": "Передан менеджеру",
-}
+# Этапы воронки настраивает владелец, но два из них защищены:
+#   is_system — куда падает лид при передаче менеджеру, без него сломается hand_off
+#   is_won    — финальный: такие лиды исключаются из рассылок
+# Этот набор засеивается при первом запуске и совпадает с прежними зашитыми
+# статусами, поэтому лиды, созданные до появления настройки, остаются на месте.
+DEFAULT_STAGES = [
+    ("new", "Новый лид", "blue", 0, 0, 0),
+    ("qualifying", "Квалификация", "violet", 1, 0, 0),
+    ("handed", "Передан менеджеру", "amber", 2, 0, 1),
+    ("won", "Сделка", "green", 3, 1, 0),
+]
+STAGE_COLORS = ("blue", "violet", "amber", "green", "red", "cyan", "pink", "gray")
 
 SCHEMA = [
     # Боты живут в базе, а не в .env: владелец подключает их из панели,
@@ -92,6 +99,16 @@ SCHEMA = [
         goal TEXT,
         ask_field TEXT,
         enabled INTEGER NOT NULL DEFAULT 1
+    )""",
+    # Этапы воронки. Порядок задаёт position, а не порядок вставки: владелец
+    # переставляет этапы в панели.
+    """CREATE TABLE IF NOT EXISTS pipeline_stages (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        color TEXT NOT NULL DEFAULT 'gray',
+        position INTEGER NOT NULL DEFAULT 0,
+        is_won INTEGER NOT NULL DEFAULT 0,
+        is_system INTEGER NOT NULL DEFAULT 0
     )""",
     # Лог обращений: всё, что требует человека. Отсюда кнопки «взять в работу»
     # и «передать менеджеру» — и в панели, и в Telegram.
@@ -394,6 +411,11 @@ def init() -> None:
     for key, value in DEFAULT_SETTINGS.items():
         run("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (key, value))
 
+    if not q("SELECT 1 FROM pipeline_stages LIMIT 1"):
+        for stage in DEFAULT_STAGES:
+            run("INSERT INTO pipeline_stages (id, title, color, position, is_won, is_system)"
+                " VALUES (?, ?, ?, ?, ?, ?)", stage)
+
     if not q("SELECT 1 FROM work_hours LIMIT 1"):
         # будни с 10 до 19, выходные закрыты — правится в панели
         for weekday in range(7):
@@ -608,6 +630,82 @@ def upsert_lead(contact_id: int, fields: dict, status: str | None = None) -> sql
     vals.append(contact_id)
     run(f"UPDATE leads SET {', '.join(sets)} WHERE contact_id = ?", vals)
     return get_lead(contact_id)  # type: ignore[return-value]
+
+
+def pipeline_stages() -> list[sqlite3.Row]:
+    return q("SELECT * FROM pipeline_stages ORDER BY position, id")
+
+
+def stage_titles() -> dict[str, str]:
+    """id → подпись. Заменяет прежний зашитый LEAD_STATUSES."""
+    return {row["id"]: row["title"] for row in pipeline_stages()}
+
+
+def system_stage() -> str:
+    """Этап «передан менеджеру». Без него передача диалога некуда бы вела."""
+    row = q1("SELECT id FROM pipeline_stages WHERE is_system = 1 ORDER BY position LIMIT 1")
+    if row:
+        return row["id"]
+    row = q1("SELECT id FROM pipeline_stages ORDER BY position DESC LIMIT 1")
+    return row["id"] if row else "handed"
+
+
+def won_stages() -> set[str]:
+    """Финальные этапы: в рассылки такие лиды не попадают."""
+    return {row["id"] for row in q("SELECT id FROM pipeline_stages WHERE is_won = 1")}
+
+
+def first_stage() -> str:
+    row = q1("SELECT id FROM pipeline_stages ORDER BY position LIMIT 1")
+    return row["id"] if row else "new"
+
+
+def save_pipeline_stages(items: list[dict]) -> int:
+    """Заменить набор этапов. Возвращает число перенесённых лидов.
+
+    Лиды с исчезнувшего этапа переносятся на первый, иначе они выпали бы из
+    воронки и перестали показываться вообще.
+    """
+    stages = []
+    seen: set[str] = set()
+    for position, item in enumerate(items):
+        stage_id = str(item.get("id") or "").strip().lower()
+        title = str(item.get("title") or "").strip()
+        color = str(item.get("color") or "gray")
+        if not re.fullmatch(r"[a-z0-9-]{1,32}", stage_id) or stage_id in seen:
+            raise ValueError("у каждого этапа должен быть свой короткий английский id")
+        if not title or len(title) > 40:
+            raise ValueError("назовите каждый этап, не длиннее 40 символов")
+        seen.add(stage_id)
+        stages.append({
+            "id": stage_id, "title": title,
+            "color": color if color in STAGE_COLORS else "gray",
+            "position": position,
+            "is_won": 1 if item.get("is_won") else 0,
+            "is_system": 1 if item.get("is_system") else 0,
+        })
+
+    if not 1 <= len(stages) <= 8:
+        raise ValueError("этапов должно быть от одного до восьми")
+    if sum(s["is_system"] for s in stages) != 1:
+        raise ValueError("нужен ровно один этап для передачи менеджеру")
+    if sum(s["is_won"] for s in stages) > 1:
+        raise ValueError("финальным можно сделать только один этап")
+
+    run("DELETE FROM pipeline_stages")
+    for stage in stages:
+        run("INSERT INTO pipeline_stages (id, title, color, position, is_won, is_system)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
+            (stage["id"], stage["title"], stage["color"], stage["position"],
+             stage["is_won"], stage["is_system"]))
+
+    valid = ",".join("?" for _ in stages)
+    moved = q1(f"SELECT COUNT(*) AS c FROM leads WHERE status NOT IN ({valid})",
+               tuple(s["id"] for s in stages))["c"]
+    if moved:
+        run(f"UPDATE leads SET status = ?, updated_at = ? WHERE status NOT IN ({valid})",
+            (stages[0]["id"], now(), *[s["id"] for s in stages]))
+    return moved
 
 
 def set_lead_status(contact_id: int, status: str, manager: str | None = None) -> None:

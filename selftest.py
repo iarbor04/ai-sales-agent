@@ -95,6 +95,39 @@ def main() -> int:
     check("шагов не больше пяти", len(db.script()) <= 5,
           f"шагов {len(db.script())} — каждый лишний вопрос роняет доходимость")
 
+    section("Этапы воронки")
+    stage_ids = [row["id"] for row in db.pipeline_stages()]
+    check("этапы засеяны при первом запуске", stage_ids == ["new", "qualifying", "handed", "won"],
+          ", ".join(stage_ids))
+    check("этап передачи менеджеру найден", db.system_stage() == "handed")
+    check("финальный этап исключается из рассылок", db.won_stages() == {"won"})
+
+    moved = db.save_pipeline_stages([
+        {"id": "new", "title": "Входящие", "color": "blue"},
+        {"id": "demo", "title": "Демо", "color": "cyan"},
+        {"id": "handed", "title": "У менеджера", "color": "amber", "is_system": True},
+        {"id": "paid", "title": "Оплачено", "color": "green", "is_won": True},
+    ])
+    check("свой набор этапов сохраняется",
+          [row["title"] for row in db.pipeline_stages()] == ["Входящие", "Демо", "У менеджера", "Оплачено"])
+    check("подписи этапов уходят в промпт модели",
+          "Демо" in ", ".join(db.stage_titles().values()))
+
+    for bad, why in (
+        ([{"id": "one", "title": "Без передачи"}], "нет этапа передачи"),
+        ([{"id": "a", "title": "A", "is_system": True}, {"id": "a", "title": "B"}], "повтор id"),
+        ([{"id": "ok", "title": "", "is_system": True}], "пустое название"),
+        ([{"id": "Плохой", "title": "Кириллица", "is_system": True}], "id не латиницей"),
+    ):
+        try:
+            db.save_pipeline_stages(bad)
+            outcome = f"принят кривой набор ({why})"
+        except ValueError:
+            outcome = ""
+        check(f"кривой набор не сохраняется — {why}", not outcome, outcome)
+    check("после отказа этапы остались прежними",
+          [row["id"] for row in db.pipeline_stages()] == ["new", "demo", "handed", "paid"])
+
     section("Контакты и лиды")
     bot_id = db.add_bot("Тест", "111:TEST", "sales")
     a = db.upsert_contact("tg", "777", "ivan", "Иван", bot_id=bot_id)
@@ -113,6 +146,19 @@ def main() -> int:
     check("лид не двоится", db.q1("SELECT COUNT(*) c FROM leads")["c"] == 1)
     check("поля накапливаются", lead["product"] == "Диван" and lead["deadline"] == "к пятнице")
     check("пустое не затирает собранное", lead["name"] == "Иван")
+
+    orphan = db.upsert_contact("tg", "960", "orphan", "Сирота")
+    db.upsert_lead(orphan["id"], {"product": "Шляпа"}, status="demo")
+    moved = db.save_pipeline_stages([
+        {"id": "new", "title": "Входящие", "color": "blue"},
+        {"id": "handed", "title": "У менеджера", "color": "amber", "is_system": True},
+    ])
+    check("удаление этапа переносит его лидов на первый",
+          moved >= 1 and db.get_lead(orphan["id"])["status"] == "new", f"перенесено {moved}")
+    db.save_pipeline_stages([{"id": stage, "title": title, "color": "gray",
+                              "is_system": stage == "handed", "is_won": stage == "won"}
+                             for stage, title in (("new", "Новый лид"), ("qualifying", "Квалификация"),
+                                                  ("handed", "Передан менеджеру"), ("won", "Сделка"))])
 
     section("База знаний")
     page = db.run(

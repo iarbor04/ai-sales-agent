@@ -36,7 +36,7 @@ def _pick_manager() -> str:
     managers = [m.strip() for m in db.setting("managers", "").split(",") if m.strip()]
     if not managers:
         return ""
-    row = db.q1("SELECT COUNT(*) AS c FROM leads WHERE status = 'handed'")
+    row = db.q1("SELECT COUNT(*) AS c FROM leads WHERE status = ?", (db.system_stage(),))
     return managers[(row["c"] if row else 0) % len(managers)]
 
 
@@ -147,7 +147,7 @@ async def _make_booking(contact_id: int, choice: dict) -> None:
 def _bump_status(contact_id: int) -> None:
     """Новый лид → Квалификация, когда пошёл предметный разговор."""
     lead = db.get_lead(contact_id)
-    if lead is None or lead["status"] != "new":
+    if lead is None or lead["status"] != db.first_stage():
         return
     filled = sum(1 for key in ("product", "need", "deadline") if lead[key])
     if filled:
@@ -164,11 +164,12 @@ async def hand_off(contact_id: int, reason: str, summary: str = "",
 
     lead = db.get_lead(contact_id)
     if lead is None:
-        db.upsert_lead(contact_id, {"summary": summary, "comment": reason}, status="handed")
+        db.upsert_lead(contact_id, {"summary": summary, "comment": reason},
+                       status=db.system_stage())
     else:
         if summary:
             db.upsert_lead(contact_id, {"summary": summary})
-        db.set_lead_status(contact_id, "handed", manager or None)
+        db.set_lead_status(contact_id, db.system_stage(), manager or None)
 
     db.set_ai(contact_id, False)
     db.run("UPDATE contacts SET manager = ? WHERE id = ?", (manager or None, contact_id))
@@ -201,7 +202,7 @@ def return_to_ai(contact_id: int) -> None:
     db.set_ai(contact_id, True)
     db.add_message(contact_id, "out", "system", "Диалог возвращён ИИ.", is_read=True)
     lead = db.get_lead(contact_id)
-    if lead and lead["status"] == "handed":
+    if lead and lead["status"] == db.system_stage():
         db.set_lead_status(contact_id, "qualifying")
 
     # открытое обращение закрываем: человек больше не нужен

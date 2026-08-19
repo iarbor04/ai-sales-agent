@@ -345,7 +345,7 @@ def _script_block(contact_id: int) -> str:
 def _system_prompt() -> str:
     business = db.setting("business_name", "").strip()
     tone = db.setting("tone", "").strip()
-    known = ", ".join(db.LEAD_STATUSES.values())
+    known = ", ".join(db.stage_titles().values())
 
     return f"""Ты — продавец-консультант компании {business or "клиента"}.
 Общаешься с клиентом в мессенджере от лица компании.

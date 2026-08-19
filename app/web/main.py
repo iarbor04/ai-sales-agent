@@ -125,7 +125,10 @@ def page(request: Request, name: str, **ctx) -> HTMLResponse:
     ctx.setdefault("assets", assets_version())
     ctx.setdefault("unread", db.unread_count())
     ctx.setdefault("open_requests", db.open_requests_count())
-    ctx.setdefault("statuses", db.LEAD_STATUSES)
+    ctx.setdefault("statuses", db.stage_titles())
+    ctx.setdefault("stages", db.pipeline_stages())
+    ctx.setdefault("system_stage", db.system_stage())
+    ctx.setdefault("colors", db.STAGE_COLORS)
     ctx.setdefault("req_statuses", db.REQUEST_STATUSES)
     ctx.setdefault("channels", config.CHANNEL_TITLES)
     ctx.setdefault("ai_on", db.setting("ai_enabled_global", "1") == "1")
@@ -213,12 +216,13 @@ async def dashboard(request: Request):
     stats = {
         "contacts": db.q1("SELECT COUNT(*) AS c FROM contacts")["c"],
         "leads": db.q1("SELECT COUNT(*) AS c FROM leads")["c"],
-        "handed": db.q1("SELECT COUNT(*) AS c FROM leads WHERE status='handed'")["c"],
+        "handed": db.q1("SELECT COUNT(*) AS c FROM leads WHERE status = ?",
+                        (db.system_stage(),))["c"],
         "audience": broadcast.audience_size(),
     }
     by_status = {
         key: db.q1("SELECT COUNT(*) AS c FROM leads WHERE status = ?", (key,))["c"]
-        for key in db.LEAD_STATUSES
+        for key in db.stage_titles()
     }
     recent = db.q(
         "SELECT c.*, l.status AS lead_status FROM contacts c"
@@ -311,22 +315,59 @@ async def return_ai(contact_id: int):
 # ── лиды ───────────────────────────────────────────────────────────────
 
 @app.get("/leads", response_class=HTMLResponse)
-async def leads(request: Request, status: str = ""):
+async def leads(request: Request, status: str = "", view: str = "board"):
     sql = (
         "SELECT l.*, c.channel, c.username, c.phone, c.name AS contact_name, c.id AS cid"
         " FROM leads l JOIN contacts c ON c.id = l.contact_id"
     )
     params: tuple = ()
-    if status in db.LEAD_STATUSES:
+    if status in db.stage_titles():
         sql += " WHERE l.status = ?"
         params = (status,)
     sql += " ORDER BY l.updated_at DESC LIMIT 300"
-    return page(request, "leads.html", rows=db.q(sql, params), current=status)
+    rows = db.q(sql, params)
+    # Доска — по колонкам этапов; таблица остаётся для тех, кому нужен список.
+    board = {stage["id"]: [] for stage in db.pipeline_stages()}
+    for row in rows:
+        board.setdefault(row["status"], []).append(row)
+    return page(request, "leads.html", rows=rows, board=board, current=status,
+                view="table" if view == "table" else "board")
+
+
+@app.post("/leads/stages")
+async def leads_stages(request: Request):
+    """Сохранить набор этапов воронки целиком."""
+    form = await request.form()
+    order = [key.split(".", 1)[1] for key in form if key.startswith("id.")]
+    items = [{
+        "id": str(form.get(f"id.{index}") or ""),
+        "title": str(form.get(f"title.{index}") or ""),
+        "color": str(form.get(f"color.{index}") or "gray"),
+        "is_won": form.get("won") == index,
+        "is_system": form.get("system") == index,
+    } for index in order]
+    try:
+        moved = await asyncio.to_thread(db.save_pipeline_stages, items)
+    except ValueError as exc:
+        return RedirectResponse("/leads?error=" + quote(str(exc)), status_code=303)
+    note = "Воронка сохранена"
+    if moved:
+        note += f". Лидов перенесено на первый этап: {moved}"
+    return RedirectResponse("/leads?ok=" + quote(note), status_code=303)
+
+
+@app.post("/leads/{contact_id}/stage")
+async def lead_stage(contact_id: int, stage: str = Form(...)):
+    """Перетащили карточку в другую колонку."""
+    if stage not in db.stage_titles():
+        return JSONResponse({"ok": False, "error": "неизвестный этап"}, status_code=400)
+    db.set_lead_status(contact_id, stage)
+    return JSONResponse({"ok": True})
 
 
 @app.post("/leads/{contact_id}/status")
 async def lead_status(contact_id: int, status: str = Form(...)):
-    if status in db.LEAD_STATUSES:
+    if status in db.stage_titles():
         db.set_lead_status(contact_id, status)
     return RedirectResponse(f"/dialogs?c={contact_id}", status_code=303)
 

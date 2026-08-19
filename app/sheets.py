@@ -86,7 +86,7 @@ def _lead_row(lead) -> list[str]:
         lead["deadline"] or "",
         lead["comment"] or "",
         lead["summary"] or "",
-        db.LEAD_STATUSES.get(lead["status"], lead["status"]),
+        db.stage_titles().get(lead["status"], lead["status"]),
         lead["manager"] or "",
         f"{config.PUBLIC_URL}/dialogs?c={lead['contact_id']}",
     ]

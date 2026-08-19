@@ -462,6 +462,24 @@ label { display: block; font-size: 12.5px; color: var(--text-2); margin-bottom: 
 .connect-step p { margin: 3px 0 0; color: var(--text-2); font-size: 13px; }
 .connect-footer { display: flex; align-items: center; gap: 12px; margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--border-soft); }
 .section-title { margin: 26px 0 12px; font-size: 15px; }
+.board { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(250px, 1fr); gap: 14px; overflow-x: auto; padding-bottom: 8px; }
+.board-col { display: flex; flex-direction: column; background: var(--surface-2); border: 1px solid var(--border-soft); border-radius: var(--radius); padding: 12px; min-height: 220px; }
+.board-col.over { border-color: var(--brand); background: var(--brand-soft); }
+.board-col > header { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; font-size: 13px; }
+.board-col > header .count { margin-left: auto; color: var(--text-3); font-size: 11px; }
+.board-col .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--text-3); }
+.board-col .dot.blue { background: #3b6ef6; } .board-col .dot.violet { background: #7d5bf5; }
+.board-col .dot.amber { background: #d98324; } .board-col .dot.green { background: var(--brand); }
+.board-col .dot.red { background: var(--danger); } .board-col .dot.cyan { background: #14a3b8; }
+.board-col .dot.pink { background: #d6479a; } .board-col .dot.gray { background: #98a2b3; }
+.board-drop { display: flex; flex-direction: column; gap: 9px; flex: 1; }
+.board .lead-card { background: var(--surface); border: 1px solid var(--border-soft); border-radius: var(--radius-sm); padding: 11px; cursor: grab; }
+.board .lead-card.dragging { opacity: .45; }
+.board .lead-card > a { font-weight: 600; font-size: 13px; }
+.board .lead-meta { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+.board .lead-meta .who { color: var(--text-3); font-size: 11px; }
+.board .lead-card p { margin: 6px 0 4px; }
+.board-empty { margin: auto; color: var(--text-3); font-size: 11px; text-align: center; }
 @media (max-width: 1000px) {
   .side { width: 62px; flex-basis: 62px; padding: 16px 8px; }
   .side .brand .logo, .side .brand .product,
