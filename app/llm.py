@@ -202,6 +202,12 @@ def _system_prompt() -> str:
     tone = db.setting("tone", "").strip()
     known = ", ".join(db.stage_titles().values())
 
+    # Свои правила владельца встают между поведением и схемой ответа: так он
+    # может добавить что угодно про свой бизнес, но не сломает формат JSON и не
+    # отменит передачу менеджеру — без них агент перестаёт отвечать вовсе.
+    extra = db.setting("prompt_extra", "").strip()
+    own = f"\n\nПРАВИЛА КОМПАНИИ (важнее общих советов выше):\n{extra}" if extra else ""
+
     return f"""Ты — продавец-консультант компании {business or "клиента"}.
 Общаешься с клиентом в мессенджере от лица компании.
 
@@ -231,10 +237,31 @@ def _system_prompt() -> str:
 - задал вопрос, ответа на который нет в базе знаний.
 
 В поля fields клади только то, что клиент сказал явно. Ничего не додумывай.
-Пустое поле — пустая строка. Статусы лида в системе: {known}.
+Пустое поле — пустая строка. Статусы лида в системе: {known}.{own}
 
 Ответ верни СТРОГО одним JSON-объектом такой формы, без markdown и пояснений:
 {ANSWER_SCHEMA}"""
+
+
+def prompt_preview(contact_id: int | None = None) -> str:
+    """Ровно то, что уходит в модель системным сообщением.
+
+    Промпт собирается из настроек, этапов воронки, шага сценария и правил
+    компании — увидеть его целиком иначе было негде, приходилось читать код.
+    """
+    from . import booking as booking_mod
+
+    prompt = _system_prompt()
+    if contact_id:
+        prompt += _script_block(contact_id)
+    elif db.script():
+        steps = db.script()
+        plan = " → ".join(step["title"] for step in steps)
+        prompt += (f"\n\nСЦЕНАРИЙ РАЗГОВОРА: {plan}\n"
+                   f"Сейчас шаг 1 из {len(steps)} — «{steps[0]['title']}».\n"
+                   f"Цель шага: {steps[0]['goal'] or steps[0]['title']}\n"
+                   "Веди разговор к цели этого шага…")
+    return prompt + booking_mod.slots_for_prompt()
 
 
 def _format_history(rows: list) -> str:

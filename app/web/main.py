@@ -615,6 +615,12 @@ async def agent_page(request: Request):
     steps = db.script()
     kb = knowledge.stats()
     return page(request, "agent.html",
+                prompt=llm.prompt_preview(),
+                prompt_extra=db.setting("prompt_extra", ""),
+                templates_list=[{"key": key, "title": item["title"],
+                                 "hint": item.get("hint", ""),
+                                 "steps": [step[0] for step in item["steps"]]}
+                                for key, item in db.SCRIPT_TEMPLATES.items()],
                 business=db.setting("business_name", ""),
                 tone=db.setting("tone", ""),
                 greeting=db.setting("greeting", ""),
@@ -633,6 +639,24 @@ async def agent_page(request: Request):
                 health=healthcheck.last(),
                 managers=db.setting("managers", ""),
                 operator_chat=db.setting("operator_chat_id", ""))
+
+
+@app.post("/agent/prompt")
+async def agent_prompt(request: Request):
+    """Свои правила компании для промпта.
+
+    Меняем только этот блок: поведение при передаче менеджеру и формат ответа
+    остаются в коде — их правка ломает агента целиком, и мы это уже видели.
+    """
+    form = await request.form()
+    text = str(form.get("prompt_extra") or "").strip()
+    if len(text) > 4000:
+        return RedirectResponse(
+            "/agent?error=" + quote("Правила длиннее 4000 символов — модель начнёт их путать"),
+            status_code=303)
+    db.set_setting("prompt_extra", text)
+    note = "Правила сохранены — агент учтёт их в следующем ответе" if text else "Правила очищены"
+    return RedirectResponse("/agent?ok=" + quote(note), status_code=303)
 
 
 # ── автоцепочки ────────────────────────────────────────────────────────

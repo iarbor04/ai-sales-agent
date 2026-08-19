@@ -137,6 +137,60 @@
 {% endif %}
 
 <div class="card">
+  <h2>Свои правила <span class="hint">дописываются в промпт</span></h2>
+  <p class="lead-text">
+    Что важно именно в вашем бизнесе: чего не обещать, что предлагать всегда,
+    как отвечать на частые возражения. Эти строки уходят в модель как правила
+    компании и считаются важнее общих советов.
+  </p>
+  <form method="post" action="/agent/prompt">
+    <div class="field">
+      <textarea name="prompt_extra" style="min-height:120px"
+        placeholder="Скидки не обещаем — их согласовывает менеджер.&#10;Всегда предлагаем доставку и называем срок.&#10;Про сроки поставки под заказ говорим «уточню у менеджера».">{{ prompt_extra }}</textarea>
+      <span class="note">Формат ответа и правила передачи менеджеру остаются в
+        коде: их правка ломает агента целиком, и он перестаёт отвечать.</span>
+    </div>
+    <button class="btn" type="submit">Сохранить правила</button>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Что уходит в модель <span class="hint">системное сообщение целиком</span></h2>
+  <p class="lead-text">
+    Собирается из названия компании, тона, ваших правил, этапов воронки и шага
+    сценария. Плюс к этому в каждом запросе идут база знаний по вопросу клиента
+    и последние сообщения переписки.
+  </p>
+  <details>
+    <summary class="small">Показать промпт ({{ prompt | length }} символов)</summary>
+    <pre class="dump" style="white-space:pre-wrap;margin-top:10px">{{ prompt }}</pre>
+  </details>
+</div>
+
+<div class="card">
+  <h2>Шаблоны сценария <span class="hint">готовые наборы шагов</span></h2>
+  <p class="lead-text">
+    Сценарий — это порядок целей разговора, а не готовые фразы: агент сам решает,
+    как достичь цели шага. Применить шаблон и поправить шаги можно в разделе
+    <a href="/script">Сценарий</a>.
+  </p>
+  <table>
+    <tr><th style="width:170px">Шаблон</th><th>Шаги</th></tr>
+    {% for item in templates_list %}
+    <tr>
+      <td><b>{{ item.title }}</b>{% if item.hint %}<div class="small dim">{{ item.hint }}</div>{% endif %}</td>
+      <td class="small">{{ item.steps | join(' → ') }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  <p class="muted small" style="margin:10px 0 0">
+    Тексты рассылок и шагов автоцепочек — отдельно, в разделах
+    <a href="/broadcast">Рассылки</a> и <a href="/autochains">Автоцепочки</a>:
+    там они мультиязычные и с кнопками.
+  </p>
+</div>
+
+<div class="card">
   <h2>Как он себя ведёт</h2>
   <p class="lead-text" style="margin-bottom:10px">
     Отвечает коротко и задаёт не больше одного вопроса за сообщение. Говорит

@@ -97,6 +97,7 @@ def main() -> int:
           f"шагов {len(db.script())} — каждый лишний вопрос роняет доходимость")
 
     section("Агент виден в панели")
+    from app import llm as llm_mod
     agent_html = (ROOT / "app/web/templates/agent.html").read_text(encoding="utf-8")
     base_html = (ROOT / "app/web/templates/base.html").read_text(encoding="utf-8")
     check("в меню есть раздел агента", '/agent' in base_html and "ИИ-продажник" in base_html)
@@ -107,6 +108,23 @@ def main() -> int:
         check(f"страница агента отвечает на «{part}»", part in agent_html)
     check("страница агента предупреждает про пустую фразу передачи",
           "клиент получит тишину" in agent_html)
+    check("промпт и шаблоны видно в панели",
+          "Что уходит в модель" in agent_html and "Шаблоны сценария" in agent_html)
+
+    # свои правила должны попадать в промпт, но не ломать контракт
+    db.set_setting("business_name", "BlackHat")
+    db.set_setting("prompt_extra", "Скидки не обещаем.")
+    prompt = llm_mod.prompt_preview()
+    check("правила компании попадают в промпт",
+          "Скидки не обещаем" in prompt and "ПРАВИЛА КОМПАНИИ" in prompt)
+    check("схема ответа остаётся на месте",
+          '"reply"' in prompt and '"handoff"' in prompt)
+    check("правила стоят до схемы ответа, а не после",
+          prompt.index("ПРАВИЛА КОМПАНИИ") < prompt.index('"reply"'))
+    db.set_setting("prompt_extra", "")
+    check("без своих правил промпт остаётся целым",
+          "ПРАВИЛА КОМПАНИИ" not in llm_mod.prompt_preview()
+          and '"handoff"' in llm_mod.prompt_preview())
 
     section("Этапы воронки")
     stage_ids = [row["id"] for row in db.pipeline_stages()]
