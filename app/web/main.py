@@ -630,7 +630,8 @@ async def agent_page(request: Request):
                 prompt_extra=db.setting("prompt_extra", ""),
                 templates_list=[{"key": key, "title": item["title"],
                                  "hint": item.get("hint", ""),
-                                 "steps": [step[0] for step in item["steps"]]}
+                                 "steps": [step[0] for step in item["steps"]],
+                                 "prompt": db.template_prompt(key)}
                                 for key, item in db.SCRIPT_TEMPLATES.items()],
                 business=db.setting("business_name", ""),
                 tone=db.setting("tone", ""),

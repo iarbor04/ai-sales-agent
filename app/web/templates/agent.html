@@ -201,58 +201,93 @@
     Открывайте, если хотите переписать инструкцию модели сами.
   </p>
 
-  <details {{ 'open' if prompt_is_custom }}>
-    <summary class="small">{{ 'Промпт заменён вручную — открыть' if prompt_is_custom else 'Редактировать промпт вручную' }}</summary>
+  <details class="prompt-editor" {{ 'open' if prompt_is_custom }}>
+    <summary class="btn ghost small">
+      {{ 'Промпт изменён вручную — открыть' if prompt_is_custom else 'Редактировать промпт' }}
+    </summary>
 
-  {% if prompt_is_custom %}
-  <div class="callout" style="margin-top:10px">
-    Промпт заменён вручную, поэтому поля выше на него больше не влияют —
-    кроме подстановок, которые вы оставили в тексте. Кнопка «Вернуть стандартный»
-    возвращает всё как было.
-  </div>
-  {% endif %}
-
-  <p class="muted small" style="margin-top:10px">
-    Подстановки: <code>{{ '{role}' }}</code> кто он, <code>{{ '{business}' }}</code> компания,
-    <code>{{ '{tone}' }}</code> тон, <code>{{ '{length}' }}</code> длина ответа,
-    <code>{{ '{handoff}' }}</code> поводы позвать менеджера, <code>{{ '{stages}' }}</code> этапы,
-    <code>{{ '{rules}' }}</code> ваши правила, <code>{{ '{schema}' }}</code> форма ответа.
-  </p>
-
-  <form method="post" action="/agent/prompt/template">
-    <div class="field">
-      <textarea name="prompt_template" style="min-height:280px; font-family: var(--mono, monospace); font-size:12px">{{ prompt_template }}</textarea>
-      <span class="note">Если убрать <code>{{ '{schema}' }}</code>, форму ответа допишу сам:
-        без неё модель отвечает свободным текстом, разбор падает и клиент остаётся
-        без ответа. После сохранения сразу проверю промпт живым запросом.</span>
+    {% if prompt_is_custom %}
+    <div class="callout">
+      Промпт заменён вручную, поэтому поля выше на него больше не влияют — кроме
+      подстановок, которые вы оставили в тексте.
     </div>
-    <div class="row between">
-      <button class="btn ghost small" type="submit" name="restore" value="1"
-              onclick="return confirm('Вернуть стандартный промпт? Ваши правки пропадут.')">
-        Вернуть стандартный</button>
-      <button class="btn" type="submit">Сохранить и проверить</button>
-    </div>
-  </form>
+    {% endif %}
 
-  </details>
+    <form method="post" action="/agent/prompt/template">
+      <div class="prompt-tools">
+        <span class="prompt-tools-label">Вставить шаблон сценария:</span>
+        {% for item in templates_list %}
+        <button type="button" class="chip" data-snippet="{{ item.prompt }}"
+                title="{{ item.steps | join(' → ') }}">{{ item.title }}</button>
+        {% endfor %}
+      </div>
 
-  <details style="margin-top:14px">
-    <summary class="small">Показать, что уходит в модель после подстановок
-      ({{ prompt | length }} символов)</summary>
-    <p class="muted small" style="margin:8px 0">
-      Плюс к этому в каждом запросе идут база знаний по вопросу клиента и
-      последние сообщения переписки.
-    </p>
-    <pre class="dump" style="white-space:pre-wrap">{{ prompt }}</pre>
+      <textarea name="prompt_template" id="prompt-template" spellcheck="false">{{ prompt_template }}</textarea>
+
+      <div class="prompt-tools">
+        <span class="prompt-tools-label">Подстановки:</span>
+        {% for mark, what in [('{role}', 'кто он'), ('{business}', 'компания'),
+                              ('{tone}', 'тон'), ('{length}', 'длина ответа'),
+                              ('{handoff}', 'когда звать менеджера'), ('{stages}', 'этапы'),
+                              ('{rules}', 'ваши правила'), ('{schema}', 'форма ответа')] %}
+        <button type="button" class="chip mono" data-snippet="{{ mark }}"
+                title="{{ what }}">{{ mark }}</button>
+        {% endfor %}
+      </div>
+
+      <p class="note">
+        Кнопки вставляют текст туда, где стоит курсор. Уберёте
+        <code>{{ '{schema}' }}</code> — форму ответа допишу сам: без неё модель
+        отвечает свободным текстом и клиент остаётся без ответа. После сохранения
+        сразу проверю промпт живым запросом.
+      </p>
+
+      <div class="row between">
+        <button class="btn ghost small" type="submit" name="restore" value="1"
+                onclick="return confirm('Вернуть стандартный промпт? Ваши правки пропадут.')">
+          Вернуть стандартный</button>
+        <button class="btn" type="submit">Сохранить и проверить</button>
+      </div>
+    </form>
+
+    <details style="margin-top:14px">
+      <summary class="small">Что уходит в модель после подстановок ({{ prompt | length }} символов)</summary>
+      <p class="muted small" style="margin:8px 0">
+        Плюс к этому в каждом запросе идут база знаний по вопросу клиента и
+        последние сообщения переписки.
+      </p>
+      <pre class="dump prompt-preview">{{ prompt }}</pre>
+    </details>
   </details>
 </div>
+
+<script>
+// Кнопки вставляют текст в позицию курсора: владелец собирает промпт из блоков,
+// а не переписывает его целиком.
+(() => {
+  const area = document.getElementById('prompt-template');
+  if (!area) return;
+  document.querySelectorAll('.chip[data-snippet]').forEach(chip => {
+    chip.addEventListener('click', () => {
+      const snippet = chip.dataset.snippet;
+      const start = area.selectionStart ?? area.value.length;
+      const end = area.selectionEnd ?? area.value.length;
+      const block = chip.classList.contains('mono') ? snippet : `\n\n${snippet}\n`;
+      area.setRangeText(block, start, end, 'end');
+      area.focus();
+      chip.classList.add('used');
+      setTimeout(() => chip.classList.remove('used'), 700);
+    });
+  });
+})();
+</script>
 
 <div class="card">
   <h2>Шаблоны сценария <span class="hint">готовые наборы шагов</span></h2>
   <p class="lead-text">
-    Сценарий — это порядок целей разговора, а не готовые фразы: агент сам решает,
-    как достичь цели шага. Применить шаблон и поправить шаги можно в разделе
-    <a href="/script">Сценарий</a>.
+    Те же шаблоны кнопками вставляются в промпт выше. А если включить их в
+    разделе <a href="/script">Сценарий</a>, агент будет вести клиента по шагам
+    и отмечать, какой шаг пройден.
   </p>
   <table>
     <tr><th style="width:170px">Шаблон</th><th>Шаги</th></tr>

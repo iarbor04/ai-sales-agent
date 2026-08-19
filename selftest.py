@@ -113,6 +113,15 @@ def main() -> int:
     check("новичок настраивает агента полями, а не промптом",
           agent_html.index("Как агент разговаривает") < agent_html.index("Промпт целиком")
           and "Когда звать менеджера" in agent_html)
+    check("шаблоны сценариев вставляются кнопками",
+          'class="chip" data-snippet' in agent_html and "Вставить шаблон сценария" in agent_html)
+    check("подстановки тоже вставляются кнопкой, а не переписыванием",
+          'class="chip mono" data-snippet' in agent_html)
+    check("шаблон превращается в текст для промпта",
+          "Веди разговор по шагам" in db.template_prompt("shop")
+          and "Знакомство" in db.template_prompt("shop"))
+    check("у несуществующего шаблона пустой текст, а не падение",
+          db.template_prompt("нет-такого") == "")
     check("сырой промпт спрятан под раскрытие",
           "<details" in agent_html.split("Промпт целиком")[1].split("</form>")[0])
 

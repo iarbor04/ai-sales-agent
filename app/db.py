@@ -922,6 +922,23 @@ def open_requests_count() -> int:
     return row["c"] if row else 0
 
 
+def template_prompt(key: str) -> str:
+    """Шаблон сценария словами — чтобы вставить его прямо в промпт.
+
+    Один и тот же набор шагов и применяется в «Сценарии», и вставляется в
+    промпт: держать два разных описания одного сценария — верный способ развести
+    их со временем.
+    """
+    template = SCRIPT_TEMPLATES.get(key)
+    if not template:
+        return ""
+    lines = [f"Веди разговор по шагам ({template['title'].lower()}):"]
+    lines += [f"{number}. {title} — {goal}"
+              for number, (title, goal, _field) in enumerate(template["steps"], start=1)]
+    lines.append("Не перескакивай через шаг и не возвращайся назад без нужды.")
+    return "\n".join(lines)
+
+
 def apply_template(key: str, bot_id: int | None = None) -> int:
     """Заменить сценарий готовым шаблоном. Возвращает число шагов."""
     template = SCRIPT_TEMPLATES.get(key)
