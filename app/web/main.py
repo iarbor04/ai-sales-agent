@@ -27,8 +27,9 @@ from fastapi.templating import Jinja2Templates
 from itsdangerous import BadSignature, URLSafeSerializer
 
 from .. import (
-    autochain, booking, broadcast, config, db, healthcheck, knowledge, llm,
-    onboarding, pricefile, providers, retrieval, rivals, sales, scheduler, sheets,
+    autochain, booking, broadcast, config, db, docfile, healthcheck, knowledge,
+    llm, onboarding, pricefile, providers, retrieval, rivals, sales, scheduler,
+    sheets,
 )
 from .. import channels
 from ..channels import base, telegram, whatsapp
@@ -396,7 +397,7 @@ async def kb_page(request: Request):
     last = db.setting("kb_last_refresh", "")
     return page(request, "knowledge.html", pages=pages, stats=knowledge.stats(),
                 site=db.setting("business_site", ""), extra=db.setting("kb_extra", ""),
-                files=pricefile.files(),
+                files=knowledge.uploads(),
                 refresh_hours=db.setting("kb_refresh_hours", "24"),
                 last_refresh=int(last) if last.isdigit() else 0)
 
@@ -420,29 +421,43 @@ async def kb_schedule(hours: str = Form("24")):
 
 @app.post("/knowledge/file")
 async def kb_file(request: Request):
-    """Прайс файлом: xlsx или csv. Ключи, публикация и доступы не нужны."""
+    """Файл в базу знаний: таблица прайса или документ.
+
+    Формат определяем по расширению — владельцу незачем выбирать «тип файла»
+    руками, он и так знает, что грузит.
+    """
     form = await request.form()
     upload = form.get("file")
     if upload is None or not getattr(upload, "filename", ""):
-        return RedirectResponse("/knowledge?error=" + quote("Выберите файл xlsx или csv"),
-                                status_code=303)
+        return RedirectResponse(
+            "/knowledge?error=" + quote("Выберите файл: xlsx, csv, PDF, DOCX, TXT или Markdown"),
+            status_code=303)
     data = await upload.read()
+    name = upload.filename
+    table = name.lower().endswith(pricefile.SUPPORTED)
+
     try:
-        result = await asyncio.to_thread(pricefile.save, upload.filename, data)
-    except pricefile.PriceFileError as exc:
-        # Неудача не трогает уже загруженное: прежний прайс остаётся в базе знаний.
+        if table:
+            result = await asyncio.to_thread(pricefile.save, name, data)
+        else:
+            result = await asyncio.to_thread(docfile.save, name, data)
+    except (pricefile.PriceFileError, docfile.DocumentError) as exc:
+        # Неудача не трогает уже загруженное: прежняя версия остаётся в базе знаний.
         return RedirectResponse("/knowledge?error=" + quote(f"Файл не прочитан: {exc}"),
                                 status_code=303)
 
-    note = f"Из файла «{upload.filename}» прочитано строк: {result['rows']}."
-    if result["hidden"]:
-        note += " Внутренние столбцы агенту не показаны: " + ", ".join(result["hidden"]) + "."
+    if table:
+        note = f"Из файла «{name}» прочитано строк: {result['rows']}."
+        if result["hidden"]:
+            note += " Внутренние столбцы агенту не показаны: " + ", ".join(result["hidden"]) + "."
+    else:
+        note = f"Из документа «{name}» прочитано символов: {result['chars']}."
     return RedirectResponse("/knowledge?ok=" + quote(note), status_code=303)
 
 
 @app.post("/knowledge/file/{page_id}/delete")
 async def kb_file_delete(page_id: int):
-    pricefile.remove(page_id)
+    knowledge.remove_upload(page_id)
     return RedirectResponse("/knowledge?ok=" + quote("Файл убран из базы знаний"),
                             status_code=303)
 

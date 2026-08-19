@@ -700,6 +700,116 @@ def main() -> int:
 
     asyncio.run(model_failures())
 
+    section("Документы в базу знаний")
+    from app import docfile
+
+    def make_docx(paragraphs: list[str], table: list[list[str]] | None = None) -> bytes:
+        """Собрать docx так же, как Word: zip с word/document.xml внутри."""
+        import io as _io
+        import zipfile as _zip
+        from xml.sax.saxutils import escape
+
+        w = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+        body = "".join(f"<w:p><w:r><w:t>{escape(text)}</w:t></w:r></w:p>" for text in paragraphs)
+        if table:
+            rows = "".join(
+                "<w:tr>" + "".join(
+                    f"<w:tc><w:p><w:r><w:t>{escape(cell)}</w:t></w:r></w:p></w:tc>"
+                    for cell in row) + "</w:tr>"
+                for row in table)
+            body += f"<w:tbl>{rows}</w:tbl>"
+
+        buffer = _io.BytesIO()
+        with _zip.ZipFile(buffer, "w") as archive:
+            archive.writestr("[Content_Types].xml",
+                             '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"/>')
+            archive.writestr("word/document.xml",
+                             f'<w:document xmlns:w="{w}"><w:body>{body}</w:body></w:document>')
+        return buffer.getvalue()
+
+    document = make_docx(
+        ["Условия доставки", "Доставка по городу — 500 рублей, срок один-два дня."],
+        [["Услуга", "Цена"], ["Подъём на этаж", "300 рублей"]])
+    text = docfile.read_text("условия.docx", document)
+    check("docx читается без сторонних библиотек", "Доставка по городу" in text, text[:60])
+    check("таблицы из docx тоже попадают в текст", "Подъём на этаж | 300 рублей" in text,
+          text[-60:])
+
+    try:
+        docfile.read_text("условия.doc", b"\xd0\xcf\x11\xe0")
+        old_word = "старый .doc принят"
+    except docfile.DocumentError as exc:
+        old_word = "" if "docx" in str(exc).lower() else str(exc)
+    check("старый .doc объясняет, что делать", not old_word, old_word)
+
+    try:
+        docfile.read_text("битый.docx", "это не zip".encode("utf-8"))
+        broken = "битый docx принят"
+    except docfile.DocumentError:
+        broken = ""
+    check("битый docx не роняет загрузку", not broken, broken)
+
+    # PDF: собираем настоящий файл с текстовым слоем
+    def make_pdf(lines: list[str]) -> bytes:
+        from pypdf import PdfWriter
+        from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
+
+        stream = "BT /F1 12 Tf 40 700 Td " + " ".join(
+            f"({line}) Tj 0 -16 Td" for line in lines) + " ET"
+        writer = PdfWriter()
+        page = writer.add_blank_page(width=595, height=842)
+        content = DecodedStreamObject()
+        content.set_data(stream.encode("latin-1"))
+        page[NameObject("/Contents")] = writer._add_object(content)
+        font = DictionaryObject()
+        font.update({NameObject("/Type"): NameObject("/Font"),
+                     NameObject("/Subtype"): NameObject("/Type1"),
+                     NameObject("/BaseFont"): NameObject("/Helvetica")})
+        resources = DictionaryObject()
+        fonts = DictionaryObject()
+        fonts[NameObject("/F1")] = writer._add_object(font)
+        resources[NameObject("/Font")] = fonts
+        page[NameObject("/Resources")] = resources
+        buffer = _io_bytes()
+        writer.write(buffer)
+        return buffer.getvalue()
+
+    def _io_bytes():
+        import io as _io
+        return _io.BytesIO()
+
+    pdf = make_pdf(["Delivery costs 500 rub per city order",
+                    "Warranty is 18 months for the frame"])
+    text = docfile.read_text("условия.pdf", pdf)
+    check("pdf с текстовым слоем читается", "Delivery costs 500" in text, text[:80])
+
+    try:
+        docfile.read_text("скан.pdf", make_pdf([]))
+        scan = "скан принят как документ"
+    except docfile.DocumentError as exc:
+        scan = "" if "текстового слоя" in str(exc) else str(exc)
+    check("скан без текста отклоняется с объяснением", not scan, scan)
+
+    saved = docfile.save("условия.pdf", pdf)
+    stored = db.q1("SELECT title, text FROM kb_pages WHERE id = ?", (saved["page_id"],))
+    check("документ попадает в базу знаний",
+          stored is not None and "Delivery costs" in stored["text"])
+    retrieval.invalidate()
+    check("агент находит текст из документа",
+          "Delivery" in retrieval.context_for("delivery cost"))
+    check("документ виден в общем списке файлов",
+          any(row["id"] == saved["page_id"] for row in knowledge.uploads()))
+    knowledge.remove_upload(saved["page_id"])
+    check("документ убирается из базы знаний",
+          db.q1("SELECT id FROM kb_pages WHERE id = ?", (saved["page_id"],)) is None)
+
+    try:
+        docfile.read_text("картинка.png", b"\x89PNG")
+        wrong = "принят неподходящий формат"
+    except docfile.DocumentError as exc:
+        wrong = "" if "PDF" in str(exc) and "DOCX" in str(exc) else str(exc)
+    check("неподходящий формат называет подходящие", not wrong, wrong)
+
     section("Прайс файлом")
     from app import pricefile as pricefile_mod
 

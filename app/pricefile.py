@@ -18,7 +18,7 @@ import re
 import zipfile
 from xml.etree import ElementTree
 
-from . import db, knowledge, retrieval
+from . import db, knowledge
 
 log = logging.getLogger("pricefile")
 
@@ -192,10 +192,6 @@ def rows_to_text(rows: list[dict]) -> tuple[str, list[str]]:
     return "\n\n".join(blocks), hidden
 
 
-def page_url(file_name: str) -> str:
-    return "file://" + re.sub(r"[^\w.\-]+", "-", (file_name or "файл").strip(), flags=re.UNICODE)
-
-
 def save(file_name: str, data: bytes) -> dict:
     """Прочитать файл и положить его в базу знаний.
 
@@ -208,39 +204,14 @@ def save(file_name: str, data: bytes) -> dict:
         raise PriceFileError("в файле не нашлось строк с данными — "
                              "проверьте, что первая строка это заголовки столбцов")
 
-    url = page_url(file_name)
-    existing = db.q1("SELECT id FROM kb_pages WHERE url = ?", (url,))
-    if existing:
-        page_id = existing["id"]
-        db.run(
-            "UPDATE kb_pages SET title = ?, text = ?, chars = ?, included = 1,"
-            " status = 'loaded', fetched_at = ? WHERE id = ?",
-            (file_name, text, len(text), db.now(), page_id),
-        )
-    else:
-        page_id = db.run(
-            "INSERT INTO kb_pages (url, title, text, chars, included, status, fetched_at)"
-            " VALUES (?, ?, ?, ?, 1, 'loaded', ?)",
-            (url, file_name, text, len(text), db.now()),
-        )
-
-    knowledge._rechunk(page_id, text)
-    retrieval.invalidate()
+    page_id = knowledge.save_upload(file_name, text)
     log.info("прайс из файла «%s»: строк %s, символов %s", file_name, len(rows), len(text))
     if hidden:
         log.info("внутренние столбцы в базу знаний не попали: %s", ", ".join(hidden))
     return {"rows": len(rows), "chars": len(text), "hidden": hidden, "page_id": page_id}
 
 
-def files() -> list:
-    """Загруженные файлы — для списка в разделе «База знаний»."""
-    return db.q("SELECT * FROM kb_pages WHERE url LIKE 'file://%' ORDER BY title")
-
-
-def remove(page_id: int) -> None:
-    row = db.q1("SELECT id FROM kb_pages WHERE id = ? AND url LIKE 'file://%'", (page_id,))
-    if not row:
-        return
-    db.run("DELETE FROM kb_chunks WHERE page_id = ?", (page_id,))
-    db.run("DELETE FROM kb_pages WHERE id = ?", (page_id,))
-    retrieval.invalidate()
+# Список и удаление живут в knowledge.py: там же хранятся загруженные документы,
+# и в панели они показываются одним списком.
+files = knowledge.uploads
+remove = knowledge.remove_upload

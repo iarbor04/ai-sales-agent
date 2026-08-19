@@ -249,6 +249,55 @@ def _rechunk(page_id: int, text: str) -> None:
                (page_id, "\n".join(chunk)))
 
 
+# ── загруженные файлы: прайсы и документы ──────────────────────────────
+# Хранилище одно на всех: и таблица, и PDF ложатся в kb_pages с адресом
+# file://, поэтому в панели они показываются одним списком, а обходчик сайта
+# их не трогает — он работает только с http-адресами.
+
+def upload_url(file_name: str) -> str:
+    return "file://" + re.sub(r"[^\w.\-]+", "-", (file_name or "файл").strip(), flags=re.UNICODE)
+
+
+def save_upload(file_name: str, text: str) -> int:
+    """Положить текст файла в базу знаний. Возвращает id страницы."""
+    from . import retrieval
+
+    url = upload_url(file_name)
+    existing = db.q1("SELECT id FROM kb_pages WHERE url = ?", (url,))
+    if existing:
+        page_id = existing["id"]
+        db.run(
+            "UPDATE kb_pages SET title = ?, text = ?, chars = ?, included = 1,"
+            " status = 'loaded', fetched_at = ? WHERE id = ?",
+            (file_name, text, len(text), db.now(), page_id),
+        )
+    else:
+        page_id = db.run(
+            "INSERT INTO kb_pages (url, title, text, chars, included, status, fetched_at)"
+            " VALUES (?, ?, ?, ?, 1, 'loaded', ?)",
+            (url, file_name, text, len(text), db.now()),
+        )
+    _rechunk(page_id, text)
+    retrieval.invalidate()
+    return page_id
+
+
+def uploads() -> list:
+    """Загруженные файлы — для списка в разделе «База знаний»."""
+    return db.q("SELECT * FROM kb_pages WHERE url LIKE 'file://%' ORDER BY title")
+
+
+def remove_upload(page_id: int) -> None:
+    from . import retrieval
+
+    row = db.q1("SELECT id FROM kb_pages WHERE id = ? AND url LIKE 'file://%'", (page_id,))
+    if not row:
+        return
+    db.run("DELETE FROM kb_chunks WHERE page_id = ?", (page_id,))
+    db.run("DELETE FROM kb_pages WHERE id = ?", (page_id,))
+    retrieval.invalidate()
+
+
 def reindex_extra() -> None:
     """Пересобрать куски для текста, вписанного руками в Настройках."""
     row = db.q1("SELECT id FROM kb_pages WHERE url = 'manual://extra'")
