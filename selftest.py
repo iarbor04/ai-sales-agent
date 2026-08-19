@@ -123,8 +123,9 @@ def main() -> int:
           and "Когда звать живого менеджера" in agent_html)
     check("шаблоны сценариев вставляются кнопками",
           'class="chip" data-snippet' in agent_html and "Готовые сценарии" in agent_html)
-    check("данные подставляются кнопкой с понятной подписью, а не кодом",
-          "Подставить данные" in agent_html and "название компании" in agent_html)
+    check("в редакторе промпта нет меток вида {business}",
+          not any(mark in agent_html for mark in
+                  ("{business}", "{role}", "{handoff}", "{schema}")))
     check("шаблон превращается в текст для промпта",
           "Веди разговор по шагам" in db.template_prompt("shop")
           and "Знакомство" in db.template_prompt("shop"))
@@ -168,6 +169,38 @@ def main() -> int:
     db.set_setting("agent_role", "продавец-консультант")
     db.set_setting("reply_length", "short")
     db.set_setting("handoff_reasons", llm_mod.DEFAULT_HANDOFF)
+
+    # Владелец правит обычный текст, а хранится шаблон с метками — иначе
+    # переименование компании застыло бы в сохранённом полгода назад промпте.
+    db.set_setting("business_name", "Студия «Северное сияние»")
+    db.set_setting("agent_role", "мастер-консультант")
+    editor = llm_mod.prompt_for_editor()
+    check("в редакторе стоят значения, а не метки",
+          "Северное сияние" in editor and "мастер-консультант" in editor
+          and "{" not in editor)
+    check("служебная форма ответа новичку не показывается",
+          '"reply"' not in editor and "JSON" not in editor)
+    back = llm_mod.template_from_editor(editor)
+    check("нетронутый текст узнаётся обратно в метки",
+          "{business}" in back and "{role}" in back and "{handoff}" in back)
+    check("нетронутый текст даёт тот же промпт, что стандартный",
+          llm_mod.render_prompt(back) == llm_mod.render_prompt(llm_mod.DEFAULT_PROMPT))
+    db.set_setting("business_name", "Другое имя")
+    check("переименование компании доходит до сохранённого промпта",
+          "Другое имя" in llm_mod.render_prompt(back))
+    edited = editor.replace("Общаешься с клиентом в мессенджере",
+                            "Пиши клиенту как старому знакомому")
+    saved = llm_mod.template_from_editor(edited)
+    check("переписанное остаётся словами владельца",
+          "как старому знакомому" in llm_mod.render_prompt(saved))
+    db.set_setting("prompt_extra", "Скидки не обещаем.")
+    check("правила компании доезжают и до переписанного промпта",
+          "Скидки не обещаем" in llm_mod.render_prompt(saved))
+    check("схема не задваивается в переписанном промпте",
+          llm_mod.render_prompt(saved).count('"step_done"') == 1)
+    db.set_setting("prompt_extra", "")
+    db.set_setting("business_name", "BlackHat")
+    db.set_setting("agent_role", "продавец-консультант")
 
     check("промпт всё ещё можно переписать целиком",
           'action="/agent/prompt/template"' in agent_html and "Вернуть стандартный" in agent_html)

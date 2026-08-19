@@ -289,28 +289,86 @@ def prompt_template() -> str:
     return db.setting("prompt_template", "").strip() or DEFAULT_PROMPT
 
 
-def render_prompt(template: str | None = None) -> str:
-    """Подставить в шаблон название, тон, этапы и правила компании."""
-    business = db.setting("business_name", "").strip() or "клиента"
-    tone = db.setting("tone", "").strip() or "по-человечески и по делу"
-    stages = ", ".join(db.stage_titles().values())
+SCHEMA_INTRO = "Ответ верни СТРОГО одним JSON-объектом"
+SCHEMA_TAIL = ("\n\n" + SCHEMA_INTRO + " такой формы, "
+               "без markdown и пояснений:\n" + SCHEMA_MARK)
+
+
+def _marks() -> list[tuple[str, str, bool]]:
+    """Метка, её значение и можно ли по значению узнать метку обратно.
+
+    Обратное превращение нужно, чтобы владелец правил обычный текст, а не
+    `{business}`, и при этом переименование компании доходило до промпта.
+    Узнавать можно не всё: пустое название подставляется словом «клиента»,
+    и замена его на метку изуродовала бы соседние предложения.
+    """
+    business = db.setting("business_name", "").strip()
+    tone = db.setting("tone", "").strip()
+    role = db.setting("agent_role", "").strip()
     extra = db.setting("prompt_extra", "").strip()
     rules = f"\n\nПРАВИЛА КОМПАНИИ (важнее общих советов выше):\n{extra}" if extra else ""
+    return [
+        (SCHEMA_MARK, ANSWER_SCHEMA, True),
+        ("{rules}", rules, bool(extra)),
+        ("{handoff}", _handoff_rules(), True),
+        ("{stages}", ", ".join(db.stage_titles().values()), True),
+        ("{length}", _length_rule(), True),
+        ("{business}", business or "клиента", bool(business)),
+        ("{tone}", tone or "по-человечески и по делу", bool(tone)),
+        ("{role}", role or "продавец-консультант", bool(role)),
+    ]
 
+
+def render_prompt(template: str | None = None) -> str:
+    """Подставить в шаблон название, тон, этапы и правила компании."""
     text = template if template is not None else prompt_template()
     if SCHEMA_MARK not in text:
-        text = text.rstrip() + (
-            "\n\nОтвет верни СТРОГО одним JSON-объектом такой формы, "
-            "без markdown и пояснений:\n" + SCHEMA_MARK)
+        text = text.rstrip() + SCHEMA_TAIL
+    text = _ensure_rules(text)
 
-    role = db.setting("agent_role", "").strip() or "продавец-консультант"
-    for mark, value in (("{business}", business), ("{tone}", tone),
-                        ("{role}", role), ("{length}", _length_rule()),
-                        ("{handoff}", _handoff_rules()),
-                        ("{stages}", stages), ("{rules}", rules),
-                        (SCHEMA_MARK, ANSWER_SCHEMA)):
+    for mark, value, _ in _marks():
         text = text.replace(mark, value)
     return text
+
+
+def _ensure_rules(text: str) -> str:
+    """Правила компании не теряются, даже если метки в тексте нет.
+
+    Владелец мог сохранить свой промпт, когда поле «что важно именно в вашем
+    деле» было пустым, а заполнить его позже. Без этого правила просто не
+    доезжали бы до модели, и понять почему было бы неоткуда.
+    """
+    if "{rules}" in text or not db.setting("prompt_extra", "").strip():
+        return text
+    cut = text.find(SCHEMA_INTRO)
+    if cut == -1:
+        return text.rstrip() + "{rules}"
+    return text[:cut].rstrip() + "{rules}\n\n" + text[cut:]
+
+
+def prompt_for_editor() -> str:
+    """Промпт как обычный текст: значения уже подставлены, меток нет.
+
+    Новичок открывал редактор и видел `{role}` и `{handoff}` — это читается
+    как код и отпугивает. Правит он теперь ровно тот текст, который читает,
+    а метки возвращаются на место при сохранении.
+    """
+    text = render_prompt()
+    cut = text.find(SCHEMA_INTRO)
+    return text[:cut].rstrip() if cut != -1 else text.rstrip()
+
+
+def template_from_editor(text: str) -> str:
+    """Обратно: узнать в тексте значения из полей и вернуть метки.
+
+    Значения ищем от длинных к коротким — иначе короткое совпадение съело бы
+    кусок длинного. Что владелец переписал руками, так и останется текстом:
+    он этого и хотел.
+    """
+    for mark, value, reversible in sorted(_marks(), key=lambda item: -len(item[1])):
+        if reversible and value.strip():
+            text = text.replace(value, mark)
+    return text.strip()
 
 
 def _system_prompt() -> str:

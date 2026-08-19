@@ -626,7 +626,7 @@ async def agent_page(request: Request):
                 tone_presets=["дружелюбный, короткий, по делу",
                               "деловой и сдержанный",
                               "тёплый, с заботой о клиенте"],
-                prompt_template=llm.prompt_template(),
+                prompt_template=llm.prompt_for_editor(),
                 prompt_is_custom=bool(db.setting("prompt_template", "").strip()),
                 prompt_extra=db.setting("prompt_extra", ""),
                 templates_list=[{"key": key, "title": item["title"],
@@ -708,14 +708,16 @@ async def agent_prompt_template(request: Request):
         return RedirectResponse(
             "/agent?error=" + quote("Промпт длиннее 20000 символов"), status_code=303)
 
-    added_schema = llm.SCHEMA_MARK not in text
-    db.set_setting("prompt_template", text)
+    # Владелец правит обычный текст, а храним шаблон с метками: тогда
+    # переименование компании или смена тона в полях доходят до промпта, а не
+    # застывают в тексте, сохранённом полгода назад.
+    template = llm.template_from_editor(text)
+    standard = llm.render_prompt(template) == llm.render_prompt(llm.DEFAULT_PROMPT)
+    db.set_setting("prompt_template", "" if standard else template)
 
     # Сразу проверяем новым промптом на живом запросе: сломанный промпт должен
     # обнаружиться здесь, а не на первом клиенте.
-    note = "Промпт сохранён"
-    if added_schema:
-        note += ". Форму ответа вы убрали — я дописал её в конец, иначе агент замолчит"
+    note = "Промпт сохранён" if not standard else "Промпт совпал со стандартным — оставил его"
     if llm.ai_ready():
         probe = await llm.check_prompt()
         if probe["ok"]:
