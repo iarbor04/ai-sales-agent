@@ -231,8 +231,7 @@ async def start_bot(bot_row) -> None:
                 raise RuntimeError(resp.text[:200])
             log.info("MAX-бот %s: вебхук на %s", bot_row["title"], url)
         except Exception as exc:  # noqa: BLE001
-            db.run("UPDATE bots SET last_error = ? WHERE id = ?",
-                   (str(exc)[:200], bot_row["id"]))
+            db.set_bot_error(bot_row["id"], str(exc))
             log.error("вебхук MAX не поставился: %s", exc)
         return
 

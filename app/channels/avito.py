@@ -210,8 +210,7 @@ async def check_token(client_id: str, conf: dict) -> dict:
 async def start_bot(bot_row) -> None:
     """Подписаться на уведомления. Long polling у Авито нет — только вебхук."""
     if config.MODE != "webhook":
-        db.run("UPDATE bots SET last_error = ? WHERE id = ?",
-               ("Авито работает только при MODE=webhook и HTTPS", bot_row["id"]))
+        db.set_bot_error(bot_row["id"], "Авито работает только при MODE=webhook и HTTPS")
         log.warning("Авито требует вебхук — включите MODE=webhook")
         return
 
@@ -238,11 +237,10 @@ async def start_bot(bot_row) -> None:
                 json={"url": url, "secret": secret},
             )
             resp.raise_for_status()
-        db.run("UPDATE bots SET last_error = NULL WHERE id = ?", (bot_row["id"],))
+        db.set_bot_error(bot_row["id"], None)
         log.info("Авито: вебхук на %s", url)
     except Exception as exc:  # noqa: BLE001
-        db.run("UPDATE bots SET last_error = ? WHERE id = ?",
-               (str(exc)[:200], bot_row["id"]))
+        db.set_bot_error(bot_row["id"], str(exc))
         log.error("вебхук Авито не поставился: %s", exc)
 
 

@@ -105,14 +105,40 @@ async def stop_all() -> None:
             await module.stop_bot(bot_id)
 
 
+# Библиотеки отвечают своими словами: «Unauthorized», «fetch failed»,
+# «Temporary failure in name resolution». Владельцу это ничего не говорит,
+# а действие в каждом случае разное.
+TOKEN_HINTS = (
+    ("unauthorized", "токен не принят — проверьте, что скопировали его целиком и не отозвали в @BotFather"),
+    ("not found", "токен не найден у платформы — возможно, бот удалён"),
+    ("fetch failed", "сервер не смог связаться с платформой — проверьте интернет на сервере"),
+    ("name resolution", "сервер не смог найти адрес платформы — проверьте DNS на сервере"),
+    ("timed out", "платформа не ответила вовремя — попробуйте ещё раз"),
+    ("connection", "не удалось связаться с платформой — проверьте сеть на сервере"),
+    ("authentication failed", "почта не приняла пару логин и пароль приложения"),
+)
+
+
+def explain_token_error(error: str) -> str:
+    low = (error or "").lower()
+    for marker, hint in TOKEN_HINTS:
+        if marker in low:
+            return hint
+    return error or "платформа не приняла токен"
+
+
 async def check_token(platform: str, token: str, conf: dict | None = None) -> dict:
     """Проверить доступ до сохранения — у каждой платформы свой способ."""
     from . import telegram
     if platform in ("mail", "avito"):
-        return await _module(platform).check_token(token, conf or {})
-    if platform in EXTRA_PLATFORMS:
-        return await _module(platform).check_token(token)
-    return await telegram.check_token(token)
+        result = await _module(platform).check_token(token, conf or {})
+    elif platform in EXTRA_PLATFORMS:
+        result = await _module(platform).check_token(token)
+    else:
+        result = await telegram.check_token(token)
+    if not result.get("ok"):
+        result["error"] = explain_token_error(str(result.get("error") or ""))
+    return result
 
 
 def live_ids() -> set[int]:

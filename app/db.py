@@ -646,6 +646,19 @@ def add_bot(title: str, token: str, role: str = "sales",
     )
 
 
+def set_bot_error(bot_id: int, error: str | None) -> None:
+    """Записать ошибку подключения бота человеческими словами.
+
+    Раньше каждый канал клал в базу текст своей библиотеки, и владелец читал
+    в панели «Telegram server says - Unauthorized» вместо понятного действия.
+    """
+    if not error:
+        run("UPDATE bots SET last_error = NULL WHERE id = ?", (bot_id,))
+        return
+    from .channels import explain_token_error
+    run("UPDATE bots SET last_error = ? WHERE id = ?", (explain_token_error(error)[:200], bot_id))
+
+
 def manager_bot() -> sqlite3.Row | None:
     """Бот для служебных уведомлений. Нет отдельного — берём первый рабочий."""
     row = q1("SELECT * FROM bots WHERE role = 'manager' AND enabled = 1 ORDER BY id LIMIT 1")

@@ -449,6 +449,19 @@ label { display: block; font-size: 12.5px; color: var(--text-2); margin-bottom: 
 }
 .callout b { color: var(--text); }
 
+.connect-card { width: 100%; text-align: left; font: inherit; cursor: pointer; }
+.connect-card.active { border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-soft); }
+.connect-panel { margin-bottom: 16px; }
+.connect-head { display: flex; align-items: center; gap: 14px; padding-bottom: 16px; margin-bottom: 18px; border-bottom: 1px solid var(--border-soft); }
+.connect-head > div:nth-child(2) { flex: 1; }
+.connect-head h2 { margin: 4px 0 0; }
+.connect-head .eyebrow { color: var(--text-3); font-size: 10px; font-weight: 700; letter-spacing: 1.1px; }
+.connect-close { width: 32px; height: 32px; border: 0; border-radius: 8px; background: var(--surface-2); color: var(--text-2); font-size: 19px; cursor: pointer; }
+.connect-step { display: grid; grid-template-columns: 26px 1fr; gap: 10px; align-items: start; margin-bottom: 14px; }
+.connect-step > span { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 8px; background: var(--brand-soft); color: var(--brand-text); font-size: 12px; font-weight: 700; }
+.connect-step p { margin: 3px 0 0; color: var(--text-2); font-size: 13px; }
+.connect-footer { display: flex; align-items: center; gap: 12px; margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--border-soft); }
+.section-title { margin: 26px 0 12px; font-size: 15px; }
 @media (max-width: 1000px) {
   .side { width: 62px; flex-basis: 62px; padding: 16px 8px; }
   .side .brand .logo, .side .brand .product,

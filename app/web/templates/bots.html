@@ -2,54 +2,92 @@
 {% block title %}Боты · ИИ-продажник{% endblock %}
 {% block body %}
 <div class="topbar">
-  <h1>Боты</h1>
+  <div style="flex:1">
+    <h1>Боты</h1>
+    <p class="sub">Выберите мессенджер и вставьте токен — остальное сделаем сами.
+      Токен проверяется до сохранения: неживой не добавится.</p>
+  </div>
   <form method="post" action="/bots/reload">
     <button class="btn ghost small">Переподключить всех</button>
   </form>
 </div>
 
-<div class="card">
-  <h2>Добавить бота</h2>
+<div class="chgrid">
+  {% for p in platforms %}
+  <button type="button" class="chcard connect-card {{ 'on' if counts.get(p.code) }}"
+          data-platform="{{ p.code }}">
+    <div class="chtop">
+      {{ chan(p.code, 'big only') }}
+      <div class="chname">
+        <b>{{ p.title }}</b>
+        {% if counts.get(p.code) %}
+        <span class="pill ok">подключено: {{ counts.get(p.code) }}</span>
+        {% else %}
+        <span class="pill">не подключён</span>
+        {% endif %}
+      </div>
+      <span class="chgo">›</span>
+    </div>
+    <p class="chabout">{{ 'Добавить ещё одного бота' if counts.get(p.code) else 'Подключить' }}</p>
+  </button>
+  {% endfor %}
+</div>
+
+{% for p in platforms %}
+<section class="card connect-panel" id="connect-{{ p.code }}" hidden>
+  <div class="connect-head">
+    {{ chan(p.code, 'big only') }}
+    <div>
+      <span class="eyebrow">ПОДКЛЮЧЕНИЕ КАНАЛА</span>
+      <h2>Подключите {{ p.title }}</h2>
+    </div>
+    <button type="button" class="connect-close" aria-label="Закрыть">×</button>
+  </div>
+
   <form method="post" action="/bots/add">
+    <input type="hidden" name="platform" value="{{ p.code }}">
+
+    {% for step in p.steps %}
+    <div class="connect-step"><span>{{ loop.index }}</span><p>{{ step | safe }}</p></div>
+    {% endfor %}
+
+    <div class="field">
+      <label>{{ p.token_label }}</label>
+      <input type="password" name="token" autocomplete="off" data-lpignore="true"
+             placeholder="{{ p.token_hint }}" required>
+      <span class="note">Токен хранится только на вашем сервере и не показывается повторно.</span>
+    </div>
+
+    {% for f in p.fields %}
+    <div class="field">
+      <label>{{ f.label }}</label>
+      <input type="text" name="{{ f.name }}" placeholder="{{ f.hint }}">
+    </div>
+    {% endfor %}
+
     <div class="row">
-      <div class="field"><label>Название</label>
+      <div class="field"><label>Название — как отображать в панели</label>
         <input type="text" name="title" placeholder="Продажник"></div>
-      <div class="field"><label>Мессенджер</label>
-        <select name="platform">
-          <option value="tg">Telegram — токен у @BotFather</option>
-          <option value="max">MAX — токен у @MasterBot</option>
-          <option value="vk">ВКонтакте — ключ сообщества</option>
-          <option value="mail">Почта — пароль приложения</option>
-          <option value="avito">Авито — client_id и secret</option>
-        </select></div>
-      <div class="field"><label>Токен бота</label>
-        <input type="text" name="token" placeholder="токен или пароль приложения" required></div>
+      {% if p.roles %}
       <div class="field"><label>Роль</label>
         <select name="role">
           <option value="sales">Продажник — говорит с клиентами</option>
           <option value="manager">Менеджерский — уведомления и кнопки</option>
         </select></div>
+      {% else %}
+      <input type="hidden" name="role" value="sales">
+      {% endif %}
     </div>
-    <div class="row">
-      <div class="field"><label>Адрес ящика — только для почты</label>
-        <input type="text" name="login" placeholder="sales@example.com"></div>
-      <div class="field"><label>IMAP-сервер</label>
-        <input type="text" name="imap_host" placeholder="определим по домену"></div>
-      <div class="field"><label>SMTP-сервер</label>
-        <input type="text" name="smtp_host" placeholder="определим по домену"></div>
-    </div>
-    <div class="field"><label>client_secret — только для Авито</label>
-      <input type="text" name="secret"
-             placeholder="кабинет продавца → Настройки → Avito API"></div>
-    <div class="field"><label>Строка подтверждения — только для ВКонтакте</label>
-      <input type="text" name="confirm"
-             placeholder="из настроек сообщества → Работа с API → Callback API"></div>
-    <div class="row between">
-      <span class="muted small">Токен проверяется до сохранения: неживой не добавится.</span>
-      <button class="btn" type="submit">Добавить</button>
-    </div>
+
+    <footer class="connect-footer">
+      <button class="btn" type="submit">Проверить и подключить</button>
+      <span class="muted small">Проверим токен у {{ p.title }} и подключим, если он живой.</span>
+    </footer>
   </form>
-</div>
+</section>
+{% endfor %}
+
+<h2 class="section-title">Подключённые боты</h2>
 
 {% for b in rows %}
 <div class="card">
@@ -120,8 +158,33 @@
 </div>
 {% else %}
 <div class="card warn">
-  <b>Ботов пока нет.</b> Создайте бота у @BotFather, скопируйте токен
-  и добавьте его выше. Без бота клиенты не смогут написать.
+  <b>Ботов пока нет.</b> Выберите мессенджер выше и вставьте токен.
+  Без бота клиенты не смогут написать.
 </div>
 {% endfor %}
+
+<script>
+// Карточка мессенджера открывает свою форму и прячет остальные: владелец
+// видит поля только того канала, который подключает.
+document.querySelectorAll('.connect-card').forEach(card => {
+  card.addEventListener('click', () => {
+    const target = document.getElementById('connect-' + card.dataset.platform);
+    const alreadyOpen = !target.hidden;
+    document.querySelectorAll('.connect-panel').forEach(p => { p.hidden = true; });
+    document.querySelectorAll('.connect-card').forEach(c => c.classList.remove('active'));
+    if (alreadyOpen) return;
+    target.hidden = false;
+    card.classList.add('active');
+    target.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+    const token = target.querySelector('input[name=token]');
+    if (token) token.focus();
+  });
+});
+document.querySelectorAll('.connect-close').forEach(button => {
+  button.addEventListener('click', () => {
+    button.closest('.connect-panel').hidden = true;
+    document.querySelectorAll('.connect-card').forEach(c => c.classList.remove('active'));
+  });
+});
+</script>
 {% endblock %}

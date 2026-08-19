@@ -292,7 +292,7 @@ async def _spin_up(row) -> None:
     try:
         me = await bot.get_me()
     except Exception as exc:  # noqa: BLE001
-        db.run("UPDATE bots SET last_error = ? WHERE id = ?", (str(exc)[:200], bot_id))
+        db.set_bot_error(bot_id, str(exc))
         log.error("бот %s не отвечает: %s", row["title"], exc)
         await bot.session.close()
         return
@@ -316,7 +316,7 @@ async def _spin_up(row) -> None:
                                   secret_token=config.WEBHOOK_SECRET)
             log.info("бот @%s: вебхук на %s", me.username, url)
         except Exception as exc:  # noqa: BLE001
-            db.run("UPDATE bots SET last_error = ? WHERE id = ?", (str(exc)[:200], bot_id))
+            db.set_bot_error(bot_id, str(exc))
             log.error("вебхук не поставился: %s", exc)
         return
 

@@ -694,11 +694,46 @@ async def hook_whatsapp(request: Request):
 
 # ── боты ───────────────────────────────────────────────────────────────
 
+# Подключение канала — по одной карточке на мессенджер, как в рассылке.
+# Раньше форма показывала сразу все поля всех платформ: владелец видел IMAP,
+# client_secret и строку подтверждения ВКонтакте, даже когда подключал Telegram.
+BOT_PLATFORMS = [
+    {"code": "tg", "title": "Telegram", "token_label": "Токен бота",
+     "token_hint": "123456789:AA…", "roles": True,
+     "steps": ["Откройте <a href=\"https://t.me/BotFather\" target=\"_blank\" rel=\"noreferrer\">@BotFather</a>,"
+               " создайте бота командой <b>/newbot</b> и скопируйте токен."],
+     "fields": []},
+    {"code": "max", "title": "MAX", "token_label": "Токен бота",
+     "token_hint": "токен из @MasterBot", "roles": False,
+     "steps": ["Внутри MAX напишите <b>@MasterBot</b>, создайте бота и скопируйте токен."],
+     "fields": []},
+    {"code": "vk", "title": "ВКонтакте", "token_label": "Ключ доступа сообщества",
+     "token_hint": "vk1.a.…", "roles": False,
+     "steps": ["Сообщество → Настройки → Работа с API → создайте ключ с правом «Сообщения».",
+               "Там же, Callback API: строку подтверждения впишите ниже."],
+     "fields": [{"name": "confirm", "label": "Строка подтверждения",
+                 "hint": "из раздела Callback API"}]},
+    {"code": "avito", "title": "Авито", "token_label": "client_id",
+     "token_hint": "из кабинета продавца", "roles": False,
+     "steps": ["Кабинет продавца → Настройки → Avito API: создайте приложение и возьмите пару client_id / client_secret."],
+     "fields": [{"name": "secret", "label": "client_secret", "hint": "вторая половина пары"}]},
+    {"code": "mail", "title": "Почта", "token_label": "Пароль приложения",
+     "token_hint": "не обычный пароль от почты", "roles": False,
+     "steps": ["В почте включите IMAP и создайте пароль приложения — обычный пароль не подойдёт."],
+     "fields": [{"name": "login", "label": "Адрес ящика", "hint": "sales@example.com"},
+                {"name": "imap_host", "label": "IMAP-сервер", "hint": "определим по домену"},
+                {"name": "smtp_host", "label": "SMTP-сервер", "hint": "определим по домену"}]},
+]
+
+
 @app.get("/bots", response_class=HTMLResponse)
 async def bots_page(request: Request):
     rows = db.bots(only_enabled=False)
+    counts: dict[str, int] = {}
+    for row in rows:
+        counts[row["platform"]] = counts.get(row["platform"], 0) + 1
     return page(request, "bots.html", rows=rows, live=channels.live_ids(), mode=config.MODE,
-                public_url=config.PUBLIC_URL)
+                public_url=config.PUBLIC_URL, platforms=BOT_PLATFORMS, counts=counts)
 
 
 @app.post("/bots/add")

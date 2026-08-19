@@ -585,6 +585,31 @@ def main() -> int:
     check("каждая платформа знает свой модуль",
           all(ch._module(p) is not None for p in ch.EXTRA_PLATFORMS))
 
+    section("Подключение каналов")
+    from app import channels as channels_mod
+    from app.web import main as web_main
+
+    check("ошибка «Unauthorized» переводится на человеческий",
+          "токен" in channels_mod.explain_token_error("Telegram server says - Unauthorized"))
+    check("сетевой сбой не выдают за неверный токен",
+          "интернет" in channels_mod.explain_token_error("fetch failed"))
+    check("незнакомую ошибку показываем как есть",
+          channels_mod.explain_token_error("странное") == "странное")
+    probe_bot = db.add_bot("Проверка ошибок", "111:AA", role="sales")
+    db.set_bot_error(probe_bot, "Telegram server says - Unauthorized")
+    stored = db.bot(probe_bot)["last_error"]
+    check("ошибка бота в карточке тоже человеческая", "токен" in (stored or ""), stored)
+    db.set_bot_error(probe_bot, None)
+    check("успешное подключение стирает ошибку", db.bot(probe_bot)["last_error"] is None)
+    db.run("DELETE FROM bots WHERE id = ?", (probe_bot,))
+    check("у каждого мессенджера своя форма подключения",
+          len(web_main.BOT_PLATFORMS) >= 5
+          and {p["code"] for p in web_main.BOT_PLATFORMS} >= {"tg", "max", "vk", "avito", "mail"})
+    check("поля почты не показываются в форме Telegram",
+          not next(p for p in web_main.BOT_PLATFORMS if p["code"] == "tg")["fields"]
+          and any(f["name"] == "imap_host"
+                  for f in next(p for p in web_main.BOT_PLATFORMS if p["code"] == "mail")["fields"]))
+
     section("Витрина каналов")
     from app.web.main import CHANNEL_CARDS
     codes = {c["code"] for c in CHANNEL_CARDS}
