@@ -29,7 +29,8 @@
     {% endif %}
   </div>
   <div class="hero-side">
-    <div class="hero-ring" style="--done: {{ (checklist.done / checklist.total * 100) | round }}">
+    <div class="hero-ring" style="--done: {{ (checklist.done / checklist.total * 100) | round }}"
+         title="Готово {{ checklist.done }} из {{ checklist.total }}">
       <b>{{ checklist.done }}/{{ checklist.total }}</b>
       <span>готово</span>
     </div>

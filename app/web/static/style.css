@@ -493,7 +493,7 @@ label { display: block; font-size: 12.5px; color: var(--text-2); margin-bottom: 
 .chain-step .step-delay input { width: 84px; }
 .chain-step textarea { min-height: 90px; }
 .navgroup { margin: 14px 10px 6px; color: var(--text-3); font-size: 9.5px; font-weight: 700; letter-spacing: .9px; text-transform: uppercase; }
-.side.narrow .navgroup, .navgroup:empty { display: none; }
+.navgroup:empty { display: none; }
 .prompt-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 10px 0; }
 .prompt-tools-label { color: var(--text-3); font-size: 11px; margin-right: 2px; }
 .chip { padding: 5px 11px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); color: var(--text-2); font: inherit; font-size: 12px; cursor: pointer; }
@@ -518,13 +518,13 @@ label { display: block; font-size: 12.5px; color: var(--text-2); margin-bottom: 
 .hero .btn.large { padding: 12px 22px; font-size: 14px; background: #fff; color: #0d3b26; border: 0; }
 .hero .btn.large:hover { background: #f2f4f7; }
 .hero-side { flex: 0 0 auto; }
-.hero-ring { display: grid; place-content: center; width: 116px; height: 116px; border-radius: 50%;
-  background: conic-gradient(#fff calc(var(--done) * 1%), rgba(255,255,255,.22) 0); text-align: center; }
-.hero-ring::before { content: ""; position: absolute; width: 92px; height: 92px; border-radius: 50%;
-  background: inherit; }
-.hero-ring b { position: relative; display: block; width: 92px; height: 92px; border-radius: 50%;
-  display: grid; place-content: center; background: rgba(0,0,0,.24); font-size: 21px; }
-.hero-ring span { position: absolute; margin-top: 62px; margin-left: 8px; font-size: 10px; opacity: .8; }
+.hero-ring { position: relative; display: grid; place-items: center; width: 112px; height: 112px;
+  border-radius: 50%; background: conic-gradient(#fff calc(var(--done) * 1%), rgba(255,255,255,.2) 0); }
+.hero-ring::after { content: ""; position: absolute; inset: 9px; border-radius: 50%;
+  background: rgba(0, 0, 0, .28); }
+.hero-ring b, .hero-ring span { position: relative; z-index: 1; line-height: 1.1; }
+.hero-ring b { font-size: 22px; letter-spacing: -.5px; }
+.hero-ring span { font-size: 10px; letter-spacing: .6px; text-transform: uppercase; opacity: .78; }
 
 .steps { display: flex; flex-direction: column; gap: 10px; margin-bottom: 26px; }
 .step-row { display: grid; grid-template-columns: 34px 1fr auto; align-items: start; gap: 16px;
@@ -543,7 +543,7 @@ label { display: block; font-size: 12.5px; color: var(--text-2); margin-bottom: 
 @media (max-width: 1000px) {
   .side { width: 62px; flex-basis: 62px; padding: 16px 8px; }
   .side .brand .logo, .side .brand .product,
-  .side nav a .label, .side .aistate span { display: none; }
+  .side nav a .label, .side .aistate span, .side .navgroup { display: none; }
   .side .brand { align-items: center; }
   .side .brand .logo-mini { display: block; }
   .side nav a { justify-content: center; }
