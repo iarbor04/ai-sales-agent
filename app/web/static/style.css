@@ -480,6 +480,12 @@ label { display: block; font-size: 12.5px; color: var(--text-2); margin-bottom: 
 .board .lead-meta .who { color: var(--text-3); font-size: 11px; }
 .board .lead-card p { margin: 6px 0 4px; }
 .board-empty { margin: auto; color: var(--text-3); font-size: 11px; text-align: center; }
+.lang-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.lang-tab { display: flex; align-items: center; gap: 6px; padding: 7px 12px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); color: var(--text-2); font: inherit; font-size: 12px; cursor: pointer; }
+.lang-tab.on { border-color: transparent; background: var(--brand-soft); color: var(--brand-text); font-weight: 600; }
+.lang-tab .filled { width: 6px; height: 6px; border-radius: 50%; background: var(--brand); }
+.cta-row { gap: 8px; margin-bottom: 8px; }
+.cta-row input:first-child { max-width: 220px; }
 @media (max-width: 1000px) {
   .side { width: 62px; flex-basis: 62px; padding: 16px 8px; }
   .side .brand .logo, .side .brand .product,

@@ -50,11 +50,14 @@ MEDIA_FIELDS = [
 
 # ── отправка ───────────────────────────────────────────────────────────
 
-def _markup(button: tuple[str, str] | None) -> InlineKeyboardMarkup | None:
-    if not button or not button[0] or not button[1]:
+def _markup(button: tuple[str, str] | None,
+            buttons: list[tuple[str, str]] | None = None) -> InlineKeyboardMarkup | None:
+    """Кнопки под сообщением. Каждая — своей строкой, так их видно целиком."""
+    pairs = [pair for pair in (buttons or ([button] if button else [])) if pair and pair[0] and pair[1]]
+    if not pairs:
         return None
     return InlineKeyboardMarkup(
-        inline_keyboard=[[InlineKeyboardButton(text=button[0], url=button[1])]]
+        inline_keyboard=[[InlineKeyboardButton(text=text, url=url)] for text, url in pairs[:3]]
     )
 
 
@@ -62,7 +65,8 @@ async def send(chat_id: str, text: str, media_path: str | None = None,
                button: tuple[str, str] | None = None,
                bot_id: int | None = None,
                markup: InlineKeyboardMarkup | None = None,
-               kind: str | None = None) -> tuple[bool, str]:
+               kind: str | None = None,
+               buttons: list[tuple[str, str]] | None = None) -> tuple[bool, str]:
     """Отправить сообщение конкретным ботом.
 
     Без bot_id берём первого живого — так работают служебные уведомления,
@@ -74,7 +78,7 @@ async def send(chat_id: str, text: str, media_path: str | None = None,
             return False, "no_bot"
         bot = next(iter(BOTS.values()))
 
-    keyboard = markup or _markup(button)
+    keyboard = markup or _markup(button, buttons)
     for _ in range(3):
         try:
             if media_path:
@@ -237,7 +241,7 @@ def _sales_router(bot_id: int) -> Router:
         contact = db.upsert_contact(
             "tg", user.id, user.username,
             " ".join(filter(None, [user.first_name, user.last_name])) or None,
-            bot_id=bot_id,
+            bot_id=bot_id, language=user.language_code,
         )
         # /start — это и подписка на рассылки, и сброс сценария в начало
         db.run(
@@ -257,7 +261,8 @@ def _sales_router(bot_id: int) -> Router:
         if user is None:
             return
         contact = db.upsert_contact("tg", user.id, user.username,
-                                    user.first_name, bot_id=bot_id)
+                                    user.first_name, bot_id=bot_id,
+                                    language=user.language_code)
         db.run("UPDATE contacts SET opted_in = 0, ai_enabled = 0 WHERE id = ?", (contact["id"],))
         await message.answer("Больше не пишем. Чтобы вернуться — отправьте /start.")
 
@@ -269,7 +274,7 @@ def _sales_router(bot_id: int) -> Router:
         contact = db.upsert_contact(
             "tg", user.id, user.username,
             " ".join(filter(None, [user.first_name, user.last_name])) or None,
-            bot_id=bot_id,
+            bot_id=bot_id, language=user.language_code,
         )
         kind, file_id, hint = _extract_media(message)
         media_path = await _download(bot_id, file_id, hint) if file_id else None

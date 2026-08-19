@@ -39,12 +39,16 @@ def visitor_id(token: str) -> str | None:
 
 
 def contact_for(token: str, name: str | None = None,
-                contact: str | None = None) -> dict | None:
-    """Найти или завести контакт посетителя сайта."""
+                contact: str | None = None, language: str | None = None) -> dict | None:
+    """Найти или завести контакт посетителя сайта.
+
+    Язык берём из браузера: в отличие от Telegram, тут его больше негде взять,
+    а мультиязычной рассылке он нужен.
+    """
     visitor = visitor_id(token)
     if not visitor:
         return None
-    row = db.upsert_contact("web", visitor, None, name, contact)
+    row = db.upsert_contact("web", visitor, None, name, contact, language=language)
     return dict(row) if row else None
 
 

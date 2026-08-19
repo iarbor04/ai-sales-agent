@@ -256,6 +256,50 @@ def main() -> int:
               not db.contact_by_id(quiet["id"])["ai_enabled"])
 
         section("Рассылки")
+        # мультиязычность: у контакта появился язык, тексты хранятся по языкам
+        db.set_setting("handoff_note", "Передаю вас менеджеру, он ответит здесь же.")
+        check("язык приводится к короткому коду",
+              db.normalize_language("ru-RU") == "ru" and db.normalize_language("") is None
+              and db.normalize_language("кириллица") is None)
+        english = db.upsert_contact("tg", "970", "eng", "John Smith",
+                                    bot_id=bot_id, language="en-GB")
+        check("язык контакта сохраняется", db.contact_by_id(english["id"])["language"] == "en")
+
+        multi = broadcast.create("Привет", None, "", "", None,
+                                 texts={"ru": "Привет, {{first_name}}", "en": "Hi, {{first_name}}"},
+                                 buttons=[{"text": "Открыть", "url": "https://ascn.ai"},
+                                          {"text": "Прайс", "url": "https://ascn.ai/price"}])
+        row = db.q1("SELECT * FROM broadcasts WHERE id = ?", (multi,))
+        check("англичанину уходит английский текст",
+              broadcast.text_for(row, "en-GB") == "Hi, {{first_name}}")
+        check("без перевода уходит русский",
+              broadcast.text_for(row, "de") == "Привет, {{first_name}}"
+              and broadcast.text_for(row, None) == "Привет, {{first_name}}")
+        check("кнопок сохраняется несколько", len(broadcast.buttons_of(row)) == 2)
+        check("имя подставляется и экранируется",
+              broadcast.personalize("Привет, {{first_name}}",
+                                    db.upsert_contact("tg", "971", None, "<b>Оля", bot_id=bot_id))
+              == "Привет, &lt;b&gt;Оля")
+
+        # фильтр по этапу и защита финального этапа
+        picked = db.upsert_contact("tg", "972", "stage", "Этапный", bot_id=bot_id)
+        db.run("UPDATE contacts SET opted_in = 1, blocked = 0")
+        db.upsert_lead(picked["id"], {"product": "Шляпа"}, status="qualifying")
+        winner = db.upsert_contact("tg", "973", "won", "Купил", bot_id=bot_id)
+        db.upsert_lead(winner["id"], {"product": "Кепка"}, status="won")
+        staged = broadcast.create("Только квалификация", None, "", "", None,
+                                  texts={"ru": "Только квалификация"}, stage_filter="qualifying")
+        ids = {row["id"] for row in broadcast.recipients(staged)}
+        qualifying = {row["contact_id"] for row in
+                      db.q("SELECT contact_id FROM leads WHERE status = 'qualifying'")}
+        check("фильтр по этапу оставляет только своих",
+              picked["id"] in ids and ids <= qualifying,
+              f"получателей {len(ids)}, из них не на этапе: {len(ids - qualifying)}")
+        everyone = broadcast.create("Всем", None, "", "", None, texts={"ru": "Всем"})
+        all_ids = [row["id"] for row in broadcast.recipients(everyone)]
+        check("клиент с финального этапа в рассылку не попадает",
+              winner["id"] not in all_ids and picked["id"] in all_ids)
+
         db.run("UPDATE contacts SET opted_in=1, blocked=0")
         bid = broadcast.create("Текст", None, "Кнопка", "https://x.ru", None)
         check("создаётся черновиком",

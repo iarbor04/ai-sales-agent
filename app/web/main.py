@@ -489,12 +489,31 @@ async def kb_test(q: str = ""):
 
 # ── рассылки ───────────────────────────────────────────────────────────
 
+# Языки рассылки. Русский первый и обязательный: он же запасной вариант для
+# всех, чей язык не заполнен или не переведён.
+BROADCAST_LANGUAGES = [
+    ("ru", "Русский"), ("en", "English"), ("es", "Español"),
+    ("de", "Deutsch"), ("zh", "中文"), ("ar", "العربية"),
+]
+
+
 @app.get("/broadcast", response_class=HTMLResponse)
 async def broadcast_page(request: Request, preview: int | None = None):
     draft = db.q1("SELECT * FROM broadcasts WHERE id = ?", (preview,)) if preview else None
     history = db.q("SELECT * FROM broadcasts ORDER BY id DESC LIMIT 30")
+    stages = [row for row in db.pipeline_stages() if not row["is_won"]]
     return page(request, "broadcast.html", draft=draft, history=history,
-                audience=broadcast.audience_size())
+                audience=broadcast.audience_size(),
+                languages=BROADCAST_LANGUAGES, stage_options=stages,
+                by_stage={row["id"]: broadcast.audience_size(row["id"]) for row in stages},
+                draft_texts=json.loads(draft["texts"] or "{}") if draft else {},
+                draft_buttons=broadcast.buttons_of(draft) if draft else [])
+
+
+@app.get("/broadcast/audience")
+async def broadcast_audience(stage: str = ""):
+    """Сколько получателей под выбранным этапом — показываем до отправки."""
+    return JSONResponse({"count": broadcast.audience_size(stage or None)})
 
 
 @app.post("/broadcast")
@@ -511,11 +530,31 @@ async def broadcast_create(request: Request):
         except ValueError:
             send_at = None
 
+    texts = {code: str(form.get(f"text.{code}") or "").strip()
+             for code, _ in BROADCAST_LANGUAGES}
+    texts = {code: value for code, value in texts.items() if value}
+    buttons = []
+    for index in range(3):
+        title = str(form.get(f"button_text.{index}") or "").strip()
+        url = str(form.get(f"button_url.{index}") or "").strip()
+        if title and url:
+            buttons.append({"text": title, "url": url})
+        elif title or url:
+            return RedirectResponse(
+                "/broadcast?error=" + quote("У кнопки нужны и надпись, и ссылка"),
+                status_code=303)
+
+    stage = str(form.get("stage_filter") or "").strip()
+    if stage and stage not in db.stage_titles():
+        stage = ""
+    if not texts and not image:
+        return RedirectResponse(
+            "/broadcast?error=" + quote("Напишите текст хотя бы на русском"),
+            status_code=303)
+
     broadcast_id = broadcast.create(
-        str(form.get("text") or "").strip(), image,
-        str(form.get("button_text") or "").strip(),
-        str(form.get("button_url") or "").strip(),
-        send_at,
+        texts.get("ru", ""), image, "", "", send_at,
+        texts=texts, buttons=buttons, stage_filter=stage or None,
     )
     return RedirectResponse(f"/broadcast?preview={broadcast_id}", status_code=303)
 
@@ -1303,7 +1342,8 @@ async def widget_send(request: Request):
     if not webchat.enabled():
         return _cors({"ok": False})
     data = await request.json()
-    contact = webchat.contact_for(str(data.get("token") or ""))
+    contact = webchat.contact_for(str(data.get("token") or ""),
+                                  language=str(data.get("language") or "") or None)
     if contact is None:
         return _cors({"ok": False, "error": "bad token"})
 

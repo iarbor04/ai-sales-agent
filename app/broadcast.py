@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 
 from . import config, db, notify
@@ -18,38 +19,91 @@ from .channels import base
 log = logging.getLogger("broadcast")
 
 
-def recipients(broadcast_id: int) -> list:
-    """Кому ещё не отправляли.
+def _audience_sql(stage: str | None) -> tuple[str, list]:
+    """Условие отбора получателей и его параметры.
 
-    Только те, кто сам запустил бота (opted_in) и не заблокировал его —
-    рассылать в WhatsApp нельзя: Cloud API запрещает писать первым вне окна
-    в 24 часа.
+    Рассылать можно только в Telegram: WhatsApp запрещает писать первым вне
+    окна в 24 часа, а посетителю сайта писать некуда — он уже ушёл. Лиды на
+    финальном этапе исключаются: догонять письмами того, кто уже купил, — худший
+    способ испортить впечатление.
     """
+    sql = " FROM contacts c WHERE c.channel = 'tg' AND c.opted_in = 1 AND c.blocked = 0"
+    params: list = []
+    won = db.won_stages()
+    if won:
+        placeholders = ",".join("?" for _ in won)
+        sql += (f" AND NOT EXISTS (SELECT 1 FROM leads l WHERE l.contact_id = c.id"
+                f" AND l.status IN ({placeholders}))")
+        params += sorted(won)
+    if stage:
+        sql += " AND EXISTS (SELECT 1 FROM leads l WHERE l.contact_id = c.id AND l.status = ?)"
+        params.append(stage)
+    return sql, params
+
+
+def recipients(broadcast_id: int) -> list:
+    """Кому ещё не отправляли — с учётом фильтра по этапу воронки."""
+    row = db.q1("SELECT stage_filter FROM broadcasts WHERE id = ?", (broadcast_id,))
+    where, params = _audience_sql(row["stage_filter"] if row else None)
     return db.q(
-        "SELECT c.* FROM contacts c"
-        " WHERE c.channel = 'tg' AND c.opted_in = 1 AND c.blocked = 0"
-        "   AND NOT EXISTS (SELECT 1 FROM broadcast_log b"
-        "                   WHERE b.broadcast_id = ? AND b.contact_id = c.id)",
-        (broadcast_id,),
+        "SELECT c.*" + where
+        + " AND NOT EXISTS (SELECT 1 FROM broadcast_log b"
+          "                 WHERE b.broadcast_id = ? AND b.contact_id = c.id)",
+        (*params, broadcast_id),
     )
 
 
-def audience_size() -> int:
-    row = db.q1(
-        "SELECT COUNT(*) AS c FROM contacts"
-        " WHERE channel = 'tg' AND opted_in = 1 AND blocked = 0"
-    )
+def audience_size(stage: str | None = None) -> int:
+    where, params = _audience_sql(stage)
+    row = db.q1("SELECT COUNT(*) AS c" + where, tuple(params))
     return row["c"] if row else 0
 
 
 def create(text: str, image_path: str | None, button_text: str, button_url: str,
-           send_at: int | None) -> int:
+           send_at: int | None, texts: dict[str, str] | None = None,
+           buttons: list[dict] | None = None, stage_filter: str | None = None) -> int:
     """Создать черновик. Ничего не отправляет — ждёт подтверждения."""
     return db.run(
-        "INSERT INTO broadcasts (text, image_path, button_text, button_url, send_at,"
-        " status, created_at) VALUES (?, ?, ?, ?, ?, 'draft', ?)",
-        (text, image_path, button_text or None, button_url or None, send_at, db.now()),
+        "INSERT INTO broadcasts (text, texts, image_path, button_text, button_url,"
+        " buttons, stage_filter, send_at, status, created_at)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?)",
+        (text, json.dumps(texts or {}, ensure_ascii=False), image_path,
+         button_text or None, button_url or None,
+         json.dumps(buttons or [], ensure_ascii=False), stage_filter or None,
+         send_at, db.now()),
     )
+
+
+def text_for(row, language: str | None) -> str:
+    """Текст на языке клиента. Нет перевода — уходит русский вариант."""
+    try:
+        texts = json.loads(row["texts"] or "{}")
+    except (ValueError, TypeError):
+        texts = {}
+    code = db.normalize_language(language) or ""
+    return (texts.get(code) or texts.get("ru") or row["text"] or "").strip()
+
+
+def buttons_of(row) -> list[tuple[str, str]]:
+    try:
+        items = json.loads(row["buttons"] or "[]")
+    except (ValueError, TypeError):
+        items = []
+    pairs = [(str(item.get("text") or "").strip(), str(item.get("url") or "").strip())
+             for item in items if isinstance(item, dict)]
+    pairs = [pair for pair in pairs if pair[0] and pair[1]]
+    if pairs:
+        return pairs[:3]
+    legacy = (row["button_text"] or "", row["button_url"] or "")
+    return [legacy] if legacy[0] and legacy[1] else []
+
+
+def personalize(text: str, contact) -> str:
+    """Подставить имя клиента. Текст уходит как HTML, поэтому имя экранируем."""
+    name = (contact["name"] or contact["username"] or "").strip()
+    first = name.split()[0] if name else ""
+    safe = first.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    return text.replace("{{first_name}}", safe)
 
 
 def confirm(broadcast_id: int) -> None:
@@ -78,14 +132,22 @@ async def send_broadcast(broadcast_id: int) -> dict:
 
     db.run("UPDATE broadcasts SET status = 'sending' WHERE id = ?", (broadcast_id,))
 
-    button = (row["button_text"] or "", row["button_url"] or "")
+    buttons = buttons_of(row)
     sent = failed = 0
 
     for contact in recipients(broadcast_id):
+        text = personalize(text_for(row, contact["language"]), contact)
+        if not text and not row["image_path"]:
+            # для этого языка текста нет и картинки нет — отправлять нечего
+            db.run(
+                "INSERT OR IGNORE INTO broadcast_log (broadcast_id, contact_id, status, sent_at)"
+                " VALUES (?, ?, 'no_text', ?)",
+                (broadcast_id, contact["id"], db.now()),
+            )
+            failed += 1
+            continue
         ok, status = await base.send(
-            contact["id"], row["text"] or "", row["image_path"],
-            button if button[0] and button[1] else None,
-            author="broadcast",
+            contact["id"], text, row["image_path"], author="broadcast", buttons=buttons,
         )
         # запись в лог идёт всегда — она и есть защита от повторной отправки
         db.run(

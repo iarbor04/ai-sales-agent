@@ -144,7 +144,9 @@
     add(text, true);
     box.value = "";
     box.style.height = "auto";
-    api("send", { token: token, text: text }).then(function () {
+    // язык браузера едет вместе с сообщением: мультиязычной рассылке нужно
+    // знать, на каком языке писать этому посетителю
+    api("send", { token: token, text: text, language: navigator.language }).then(function () {
       setTimeout(pull, 900);
     });
   });

@@ -31,17 +31,43 @@
 <div class="card">
   <h2>Новая рассылка</h2>
   <form method="post" action="/broadcast" enctype="multipart/form-data">
+    <div class="lang-tabs">
+      {% for code, title in languages %}
+      <button type="button" class="lang-tab {{ 'on' if loop.first }}" data-lang="{{ code }}">
+        {{ title }}<i class="filled" hidden></i>
+      </button>
+      {% endfor %}
+    </div>
+    {% for code, title in languages %}
+    <div class="field lang-pane" data-lang="{{ code }}" {{ '' if loop.first else 'hidden' }}>
+      <label>Текст — {{ title }}</label>
+      <textarea name="text.{{ code }}" data-lang="{{ code }}"
+        placeholder="{{ 'Что отправляем подписчикам' if code == 'ru' else 'Пусто — этим клиентам уйдёт русский текст' }}"></textarea>
+      <span class="note">Переменная <b>{{ '{{first_name}}' }}</b> подставит имя клиента.</span>
+    </div>
+    {% endfor %}
+
     <div class="field">
-      <label>Текст</label>
-      <textarea name="text" placeholder="Что отправляем подписчикам"></textarea>
+      <label>Кнопки под сообщением — до трёх</label>
+      {% for index in [0, 1, 2] %}
+      <div class="row cta-row">
+        <input type="text" name="button_text.{{ index }}" placeholder="Надпись {{ index + 1 }}">
+        <input type="text" name="button_url.{{ index }}" placeholder="https://...">
+      </div>
+      {% endfor %}
+      <span class="note">В каналах кроме Telegram вторая и третья уйдут ссылками в тексте.</span>
     </div>
+
     <div class="row">
-      <div class="field"><label>Текст кнопки</label>
-        <input type="text" name="button_text" placeholder="Подробнее"></div>
-      <div class="field"><label>Ссылка кнопки</label>
-        <input type="text" name="button_url" placeholder="https://..."></div>
-    </div>
-    <div class="row">
+      <div class="field"><label>Кому отправляем</label>
+        <select name="stage_filter" id="stage-filter">
+          <option value="">все активные — {{ audience }}</option>
+          {% for stage in stage_options %}
+          <option value="{{ stage.id }}">{{ stage.title }} — {{ by_stage.get(stage.id, 0) }}</option>
+          {% endfor %}
+        </select>
+        <span class="note" id="audience-note">Клиенты на финальном этапе в рассылку не попадают.</span>
+      </div>
       <div class="field"><label>Картинка</label>
         <input type="file" name="image" accept="image/*"></div>
       <div class="field"><label>Когда отправить</label>
@@ -53,6 +79,24 @@
     </div>
   </form>
 </div>
+
+<script>
+// Языковые вкладки: точка на вкладке значит, что перевод заполнен.
+document.querySelectorAll('.lang-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.lang-tab').forEach(t => t.classList.remove('on'));
+    document.querySelectorAll('.lang-pane').forEach(p => { p.hidden = p.dataset.lang !== tab.dataset.lang; });
+    tab.classList.add('on');
+    document.querySelector(`.lang-pane[data-lang="${tab.dataset.lang}"] textarea`).focus();
+  });
+});
+document.querySelectorAll('.lang-pane textarea').forEach(area => {
+  area.addEventListener('input', () => {
+    const tab = document.querySelector(`.lang-tab[data-lang="${area.dataset.lang}"] .filled`);
+    tab.hidden = !area.value.trim();
+  });
+});
+</script>
 
 <div class="card">
   <h2>История</h2>

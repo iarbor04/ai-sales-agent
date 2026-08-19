@@ -273,6 +273,12 @@ LATE_COLUMNS = [
     ("bots", "script_enabled", "INTEGER NOT NULL DEFAULT 0"),
     ("bots", "greeting", "TEXT"),
     ("bots", "last_error", "TEXT"),
+    # Язык клиента: без него мультиязычная рассылка не знает, какой текст брать.
+    ("contacts", "language", "TEXT"),
+    # Рассылка: варианты текста по языкам, до трёх кнопок, отбор по этапу воронки.
+    ("broadcasts", "texts", "TEXT"),
+    ("broadcasts", "buttons", "TEXT"),
+    ("broadcasts", "stage_filter", "TEXT"),
     ("leads", "summary", "TEXT"),
     ("leads", "manager", "TEXT"),
     ("leads", "synced_at", "INTEGER"),
@@ -534,24 +540,32 @@ def get_contact(channel: str, external_id: str,
     )
 
 
+def normalize_language(value: str | None) -> str | None:
+    """«ru-RU» → «ru». Рассылка хранит тексты по короткому коду."""
+    code = (value or "").strip().lower().replace("_", "-").split("-")[0]
+    return code if code.isalpha() and len(code) == 2 else None
+
+
 def upsert_contact(channel: str, external_id: str, username: str | None = None,
                    name: str | None = None, phone: str | None = None,
-                   bot_id: int | None = None) -> sqlite3.Row:
+                   bot_id: int | None = None, language: str | None = None) -> sqlite3.Row:
     """Найти контакт или завести новый. Дубли невозможны по UNIQUE."""
+    language = normalize_language(language)
     existing = get_contact(channel, external_id, bot_id)
     if existing:
         # не затираем уже известное пустотой
         run(
             "UPDATE contacts SET username = COALESCE(?, username),"
-            " name = COALESCE(?, name), phone = COALESCE(?, phone) WHERE id = ?",
-            (username, name, phone, existing["id"]),
+            " name = COALESCE(?, name), phone = COALESCE(?, phone),"
+            " language = COALESCE(?, language) WHERE id = ?",
+            (username, name, phone, language, existing["id"]),
         )
         return get_contact(channel, external_id, bot_id)  # type: ignore[return-value]
 
     run(
-        "INSERT INTO contacts (bot_id, channel, external_id, username, name, phone, created_at)"
-        " VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (bot_id, channel, str(external_id), username, name, phone, now()),
+        "INSERT INTO contacts (bot_id, channel, external_id, username, name, phone,"
+        " language, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (bot_id, channel, str(external_id), username, name, phone, language, now()),
     )
     return get_contact(channel, external_id, bot_id)  # type: ignore[return-value]
 

@@ -23,6 +23,11 @@ KINDS = {
 }
 
 
+def contact_channel(contact_id: int) -> str:
+    row = db.contact_by_id(contact_id)
+    return row["channel"] if row else ""
+
+
 def media_kind(path: str | None) -> str | None:
     """Тип вложения по расширению. Неизвестное шлём документом."""
     if not path:
@@ -41,7 +46,8 @@ def media_file(path: str) -> Path:
 
 
 async def send(contact_id: int, text: str, media_path: str | None = None,
-               button: tuple[str, str] | None = None, author: str = "ai") -> tuple[bool, str]:
+               button: tuple[str, str] | None = None, author: str = "ai",
+               buttons: list[tuple[str, str]] | None = None) -> tuple[bool, str]:
     """Отправить сообщение контакту и записать его в переписку.
 
     Возвращает (успех, статус). Статусы: sent | blocked | empty | error | no_channel.
@@ -52,6 +58,16 @@ async def send(contact_id: int, text: str, media_path: str | None = None,
         return False, "no_contact"
 
     text = (text or "").strip()
+
+    # Несколько кнопок умеет только Telegram. В остальных каналах вторая и
+    # третья уезжают ссылками в текст — молча терять их нельзя.
+    pairs = [pair for pair in (buttons or ([button] if button else [])) if pair and pair[0] and pair[1]]
+    if contact_channel(contact_id) != "tg" and len(pairs) > 1:
+        extra = "\n".join(f"{name}: {url}" for name, url in pairs[1:])
+        text = f"{text}\n\n{extra}".strip()
+        pairs = pairs[:1]
+    button = pairs[0] if pairs else None
+
     if not text and not media_path:
         return False, "empty"
 
@@ -63,7 +79,7 @@ async def send(contact_id: int, text: str, media_path: str | None = None,
         # отвечаем тем же ботом, которому человек написал
         ok, status = await telegram.send(
             contact["external_id"], text, media_path, button,
-            bot_id=contact["bot_id"], kind=kind,
+            bot_id=contact["bot_id"], kind=kind, buttons=pairs,
         )
     elif channel == "web":
         from . import web as webchat
