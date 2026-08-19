@@ -281,6 +281,10 @@ def main() -> int:
     install_sh = (ROOT / "deploy/install.sh").read_text(encoding="utf-8")
     check("установка не перезаписывает службу другой установки",
           "уже обслуживает" in install_sh and "SERVICE=${SERVICE:-ai-sales}" in install_sh)
+    check("установка ловит занятый порт до запуска",
+          "порт $PORT_WANTED уже занят" in install_sh)
+    check("статус сверяет владельца порта со службой",
+          "MainPID" in status_sh and "вторая установка" in status_sh)
     check("статус не принимает чужой ответ на порту за свой",
           '"ok":true' in status_sh and "отвечает не наша служба" in status_sh)
     check("сброс стирает и вложения, и базу",

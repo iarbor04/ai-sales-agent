@@ -53,6 +53,19 @@ else
   echo "   .env уже есть, не трогаем"
 fi
 
+# Порт занят другой установкой — вторая копия молча не поднимется, а статус
+# покажет здоровье первой. Проверяем до создания службы.
+PORT_WANTED=$(grep -E '^PORT=' "$APP_DIR/.env" 2>/dev/null | cut -d= -f2 | tr -d ' ' || true)
+PORT_WANTED=${PORT_WANTED:-8000}
+BUSY_PID=$(ss -tlnpH "sport = :$PORT_WANTED" 2>/dev/null | grep -oE 'pid=[0-9]+' | head -1 | cut -d= -f2 || true)
+if [ -n "$BUSY_PID" ] && ! systemctl show -p MainPID --value "$SERVICE" 2>/dev/null | grep -qx "$BUSY_PID"; then
+  BUSY_WHO=$(ps -p "$BUSY_PID" -o comm= 2>/dev/null || echo "процесс $BUSY_PID")
+  echo "ОСТАНОВКА: порт $PORT_WANTED уже занят ($BUSY_WHO)."
+  echo "Впишите свободный порт в $APP_DIR/.env и запустите установку заново:"
+  echo "  sed -i 's/^PORT=.*/PORT=8010/' $APP_DIR/.env"
+  exit 1
+fi
+
 echo "== служба systemd"
 $SUDO tee /etc/systemd/system/$SERVICE.service >/dev/null <<UNIT
 [Unit]
