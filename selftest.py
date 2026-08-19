@@ -109,7 +109,12 @@ def main() -> int:
     check("страница агента предупреждает про пустую фразу передачи",
           "клиент получит тишину" in agent_html)
     check("промпт и шаблоны видно в панели",
-          "Промпт агента" in agent_html and "Шаблоны сценария" in agent_html)
+          "Промпт целиком" in agent_html and "Шаблоны сценария" in agent_html)
+    check("новичок настраивает агента полями, а не промптом",
+          agent_html.index("Как агент разговаривает") < agent_html.index("Промпт целиком")
+          and "Когда звать менеджера" in agent_html)
+    check("сырой промпт спрятан под раскрытие",
+          "<details" in agent_html.split("Промпт целиком")[1].split("</form>")[0])
 
     # свои правила должны попадать в промпт, но не ломать контракт
     db.set_setting("business_name", "BlackHat")
@@ -134,6 +139,19 @@ def main() -> int:
     db.set_setting("prompt_template", "")
     check("пустая настройка возвращает стандартный промпт",
           "ГЛАВНОЕ ПРАВИЛО" in llm_mod.prompt_preview())
+    # поведение собирается из простых настроек
+    db.set_setting("agent_role", "консультант по шляпам")
+    db.set_setting("reply_length", "medium")
+    db.set_setting("handoff_reasons", "human,buy")
+    built = llm_mod.prompt_preview()
+    check("роль из поля попадает в промпт", "консультант по шляпам" in built)
+    check("длина ответа управляется выбором", "До пяти предложений" in built)
+    check("галочки задают поводы позвать человека",
+          built.count("- клиент") == 2 and "жалуется" not in built, str(built.count("- клиент")))
+    db.set_setting("agent_role", "продавец-консультант")
+    db.set_setting("reply_length", "short")
+    db.set_setting("handoff_reasons", llm_mod.DEFAULT_HANDOFF)
+
     check("страница даёт править промпт целиком",
           'action="/agent/prompt/template"' in agent_html and "Вернуть стандартный" in agent_html)
 

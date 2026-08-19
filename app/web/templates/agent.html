@@ -137,32 +137,88 @@
 {% endif %}
 
 <div class="card">
-  <h2>Свои правила <span class="hint">дописываются в промпт</span></h2>
+  <h2>Как агент разговаривает</h2>
   <p class="lead-text">
-    Что важно именно в вашем бизнесе: чего не обещать, что предлагать всегда,
-    как отвечать на частые возражения. Эти строки уходят в модель как правила
-    компании и считаются важнее общих советов.
+    Это и есть его характер. Заполните понятными словами — промпт для модели
+    соберётся сам.
   </p>
   <form method="post" action="/agent/prompt">
-    <div class="field">
-      <textarea name="prompt_extra" style="min-height:120px"
-        placeholder="Скидки не обещаем — их согласовывает менеджер.&#10;Всегда предлагаем доставку и называем срок.&#10;Про сроки поставки под заказ говорим «уточню у менеджера».">{{ prompt_extra }}</textarea>
-      <span class="note">Формат ответа и правила передачи менеджеру остаются в
-        коде: их правка ломает агента целиком, и он перестаёт отвечать.</span>
+    <div class="row">
+      <div class="field">
+        <label>Кто он для клиента</label>
+        <input type="text" name="agent_role" value="{{ agent_role }}"
+               placeholder="продавец-консультант" maxlength="120">
+        <span class="note">Например: консультант по головным уборам, менеджер отдела продаж.</span>
+      </div>
+      <div class="field">
+        <label>Тон общения</label>
+        <input type="text" name="tone" value="{{ tone }}" list="tone-presets"
+               placeholder="дружелюбный, короткий, по делу" maxlength="120">
+        <datalist id="tone-presets">
+          {% for preset in tone_presets %}<option value="{{ preset }}"></option>{% endfor %}
+        </datalist>
+      </div>
+      <div class="field">
+        <label>Длина ответа</label>
+        <select name="reply_length">
+          {% for key, text in lengths.items() %}
+          <option value="{{ key }}" {{ 'selected' if reply_length == key }}>{{ text }}</option>
+          {% endfor %}
+        </select>
+      </div>
     </div>
-    <button class="btn" type="submit">Сохранить правила</button>
+
+    <div class="field">
+      <label>Когда звать менеджера</label>
+      {% for key, text in handoff_reasons.items() %}
+      <label class="check">
+        <input type="checkbox" name="handoff_{{ key }}" {{ 'checked' if key in handoff_on }}
+               {{ 'disabled checked' if key == 'human' }}>
+        <span>{{ text }}</span>
+      </label>
+      {% endfor %}
+      <span class="note">Просьбу позвать человека выключить нельзя: иначе клиент
+        останется с ботом навсегда.</span>
+    </div>
+
+    <div class="field">
+      <label>Что важно именно в вашем бизнесе</label>
+      <textarea name="prompt_extra" style="min-height:110px"
+        placeholder="Скидки не обещаем — их согласовывает менеджер.&#10;Всегда предлагаем доставку и называем срок.&#10;Про сроки под заказ говорим «уточню у менеджера».">{{ prompt_extra }}</textarea>
+      <span class="note">По одному правилу в строке. Это указания модели: она их
+        учитывает, но не выполняет как программу — самое важное лучше писать первым.</span>
+    </div>
+
+    <button class="btn" type="submit">Сохранить</button>
   </form>
 </div>
 
 <div class="card">
-  <h2>Промпт агента
-    <span class="hint">{{ 'изменён вами' if prompt_is_custom else 'стандартный' }}</span></h2>
+  <h2>Промпт целиком
+    <span class="hint">{{ 'изменён вручную' if prompt_is_custom else 'для продвинутых' }}</span></h2>
   <p class="lead-text">
-    Это инструкция, по которой агент разговаривает. Правьте как хотите — только
-    оставьте на месте подстановки: <code>{{ '{business}' }}</code> название компании,
-    <code>{{ '{tone}' }}</code> тон, <code>{{ '{stages}' }}</code> этапы воронки,
-    <code>{{ '{rules}' }}</code> ваши правила выше, <code>{{ '{schema}' }}</code> форма ответа.
+    Обычно сюда заходить не нужно: всё, что выше, и есть промпт, только словами.
+    Открывайте, если хотите переписать инструкцию модели сами.
   </p>
+
+  <details {{ 'open' if prompt_is_custom }}>
+    <summary class="small">{{ 'Промпт заменён вручную — открыть' if prompt_is_custom else 'Редактировать промпт вручную' }}</summary>
+
+  {% if prompt_is_custom %}
+  <div class="callout" style="margin-top:10px">
+    Промпт заменён вручную, поэтому поля выше на него больше не влияют —
+    кроме подстановок, которые вы оставили в тексте. Кнопка «Вернуть стандартный»
+    возвращает всё как было.
+  </div>
+  {% endif %}
+
+  <p class="muted small" style="margin-top:10px">
+    Подстановки: <code>{{ '{role}' }}</code> кто он, <code>{{ '{business}' }}</code> компания,
+    <code>{{ '{tone}' }}</code> тон, <code>{{ '{length}' }}</code> длина ответа,
+    <code>{{ '{handoff}' }}</code> поводы позвать менеджера, <code>{{ '{stages}' }}</code> этапы,
+    <code>{{ '{rules}' }}</code> ваши правила, <code>{{ '{schema}' }}</code> форма ответа.
+  </p>
+
   <form method="post" action="/agent/prompt/template">
     <div class="field">
       <textarea name="prompt_template" style="min-height:280px; font-family: var(--mono, monospace); font-size:12px">{{ prompt_template }}</textarea>
@@ -177,6 +233,8 @@
       <button class="btn" type="submit">Сохранить и проверить</button>
     </div>
   </form>
+
+  </details>
 
   <details style="margin-top:14px">
     <summary class="small">Показать, что уходит в модель после подстановок

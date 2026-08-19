@@ -616,6 +616,15 @@ async def agent_page(request: Request):
     kb = knowledge.stats()
     return page(request, "agent.html",
                 prompt=llm.prompt_preview(),
+                agent_role=db.setting("agent_role", ""),
+                reply_length=db.setting("reply_length", "short"),
+                lengths=llm.LENGTHS,
+                handoff_reasons=llm.HANDOFF_REASONS,
+                handoff_on=[key.strip() for key in
+                            db.setting("handoff_reasons", llm.DEFAULT_HANDOFF).split(",")],
+                tone_presets=["дружелюбный, короткий, по делу",
+                              "деловой и сдержанный",
+                              "тёплый, с заботой о клиенте"],
                 prompt_template=llm.prompt_template(),
                 prompt_is_custom=bool(db.setting("prompt_template", "").strip()),
                 prompt_extra=db.setting("prompt_extra", ""),
@@ -645,16 +654,33 @@ async def agent_page(request: Request):
 
 @app.post("/agent/prompt")
 async def agent_prompt(request: Request):
-    """Свои правила компании для промпта."""
+    """Поведение агента простыми полями: кто он, как отвечает, когда зовёт человека."""
     form = await request.form()
     text = str(form.get("prompt_extra") or "").strip()
     if len(text) > 4000:
         return RedirectResponse(
             "/agent?error=" + quote("Правила длиннее 4000 символов — модель начнёт их путать"),
             status_code=303)
+
     db.set_setting("prompt_extra", text)
-    note = "Правила сохранены — агент учтёт их в следующем ответе" if text else "Правила очищены"
-    return RedirectResponse("/agent?ok=" + quote(note), status_code=303)
+    role = str(form.get("agent_role") or "").strip()
+    if role:
+        db.set_setting("agent_role", role[:120])
+    tone = str(form.get("tone") or "").strip()
+    if tone:
+        db.set_setting("tone", tone[:120])
+    length = str(form.get("reply_length") or "")
+    if length in llm.LENGTHS:
+        db.set_setting("reply_length", length)
+
+    chosen = [key for key in llm.HANDOFF_REASONS if form.get(f"handoff_{key}")]
+    # Совсем без поводов агент никогда не позовёт человека — оставляем просьбу
+    # о менеджере, иначе клиент останется с ботом навсегда.
+    if "human" not in chosen:
+        chosen.insert(0, "human")
+    db.set_setting("handoff_reasons", ",".join(chosen))
+
+    return RedirectResponse("/agent?ok=" + quote("Настройки агента сохранены"), status_code=303)
 
 
 @app.post("/agent/prompt/template")
