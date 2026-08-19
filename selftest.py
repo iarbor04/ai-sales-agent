@@ -361,6 +361,23 @@ def main() -> int:
     install_sh = (ROOT / "deploy/install.sh").read_text(encoding="utf-8")
     check("установка не перезаписывает службу другой установки",
           "уже обслуживает" in install_sh and "SERVICE=${SERVICE:-ai-sales}" in install_sh)
+    # Проверяем исполнением, а не поиском подстроки: под `set -euo pipefail`
+    # эта строка молча роняла деплой на установках без SERVICE_NAME в .env,
+    # и «скрипт содержит нужные слова» такую поломку не ловит.
+    def service_fallback(script: str) -> str:
+        import subprocess
+        line = next(l for l in (ROOT / f"deploy/{script}").read_text(encoding="utf-8").splitlines()
+                    if l.startswith("SERVICE=${SERVICE:-$("))
+        with tempfile.TemporaryDirectory() as tmp:
+            (pathlib.Path(tmp) / ".env").write_text("PORT=8000\n", encoding="utf-8")
+            code = f'set -euo pipefail\nAPP_DIR={tmp}\n{line}\nSERVICE=${{SERVICE:-ai-sales}}\necho "$SERVICE"'
+            out = subprocess.run(["bash", "-c", code], capture_output=True, text=True)
+            return out.stdout.strip() if out.returncode == 0 else f"выход {out.returncode}"
+
+    for script in ("deploy.sh", "status.sh", "reset.sh"):
+        got = service_fallback(script)
+        check(f"{script} переживает .env без SERVICE_NAME", got == "ai-sales", got)
+
     check("имя службы принадлежит установке, а не скрипту",
           all("SERVICE_NAME=" in (ROOT / f"deploy/{name}").read_text(encoding="utf-8")
               for name in ("install.sh", "status.sh", "deploy.sh", "reset.sh")))

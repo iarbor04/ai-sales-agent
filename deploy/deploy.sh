@@ -6,7 +6,10 @@ set -euo pipefail
 APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # Имя службы принадлежит установке, а не скрипту: на машине бывает несколько
 # копий, и каждая должна управлять своей. install.sh пишет его в .env.
-SERVICE=${SERVICE:-$(grep -E '^SERVICE_NAME=' "$APP_DIR/.env" 2>/dev/null | cut -d= -f2 | tr -d ' ')}
+# `|| true` обязателен: под `set -euo pipefail` grep, не нашедший строку,
+# валит весь скрипт молча — на установках, сделанных до появления SERVICE_NAME,
+# деплой просто выходил с кодом 1 и без единого слова.
+SERVICE=${SERVICE:-$(grep -E '^SERVICE_NAME=' "$APP_DIR/.env" 2>/dev/null | cut -d= -f2 | tr -d ' ' || true)}
 SERVICE=${SERVICE:-ai-sales}
 [ "$(id -u)" -ne 0 ] && SUDO=sudo || SUDO=""
 
