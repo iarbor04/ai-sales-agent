@@ -1,0 +1,168 @@
+{% extends "base.html" %}
+{% block title %}Агент · ИИ-продажник{% endblock %}
+{% block body %}
+<div class="topbar">
+  <div style="flex:1">
+    <h1>{{ business or 'Ваш ИИ-продажник' }}</h1>
+    <p class="sub">Это он и отвечает клиентам в мессенджерах. Здесь видно, из чего
+      он состоит и чего ему не хватает.</p>
+  </div>
+  {% if ai_on and key_ready and key_check.ok and live_channels %}
+  <span class="pill ok">агент на связи</span>
+  {% else %}
+  <span class="pill warn">агент ещё не отвечает</span>
+  {% endif %}
+</div>
+
+<div class="grid c4">
+  <div class="stat">
+    <div class="n">{{ live_channels | length }}</div>
+    <div class="l">каналов на связи</div>
+  </div>
+  <div class="stat">
+    <div class="n">{{ kb.chunks }}</div>
+    <div class="l">фрагментов знаний</div>
+  </div>
+  <div class="stat">
+    <div class="n">{{ steps | length if script_bots else '—' }}</div>
+    <div class="l">шагов сценария</div>
+  </div>
+  <div class="stat">
+    <div class="n">{{ sales_bots | length }}</div>
+    <div class="l">ботов-продавцов</div>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Из чего он собран</h2>
+  <table>
+    <tr>
+      <td style="width:190px">Мозг</td>
+      <td>
+        {% if not key_ready %}
+        <span class="pill warn">доступ не настроен</span>
+        <span class="muted small">Без него агент молчит и зовёт менеджера.</span>
+        {% elif key_check.ok %}
+        <span class="pill ok">{{ provider_title }}</span>
+        <span class="muted small">модель <code>{{ model }}</code></span>
+        {% else %}
+        <span class="pill bad">{{ provider_title }} не принял доступ</span>
+        <span class="small" style="color:var(--danger)">{{ key_check.detail }}</span>
+        {% endif %}
+      </td>
+      <td class="right"><a class="btn ghost small" href="/settings">Настроить</a></td>
+    </tr>
+    <tr>
+      <td>Чем отвечает</td>
+      <td>
+        {% if kb.chunks %}
+        <span class="pill ok">{{ kb.loaded }} источников</span>
+        <span class="muted small">прайс, документы, страницы сайта</span>
+        {% else %}
+        <span class="pill warn">база знаний пуста</span>
+        <span class="muted small">агент не сможет назвать ни цену, ни условия.</span>
+        {% endif %}
+      </td>
+      <td class="right"><a class="btn ghost small" href="/knowledge">Наполнить</a></td>
+    </tr>
+    <tr>
+      <td>Где говорит</td>
+      <td>
+        {% if live_channels %}
+        {% for code in live_channels %}{{ chan(code) }}{% endfor %}
+        {% else %}
+        <span class="pill warn">каналов нет</span>
+        <span class="muted small">клиентам некуда написать.</span>
+        {% endif %}
+      </td>
+      <td class="right"><a class="btn ghost small" href="/bots">Подключить</a></td>
+    </tr>
+    <tr>
+      <td>Как ведёт разговор</td>
+      <td>
+        {% if script_bots %}
+        <span class="pill ok">по сценарию, {{ steps | length }} шагов</span>
+        {% else %}
+        <span class="pill">свободно по базе знаний</span>
+        <span class="muted small">сценарий выключен — отвечает по вопросу клиента.</span>
+        {% endif %}
+        {% if tone %}<span class="muted small">тон: {{ tone }}</span>{% endif %}
+      </td>
+      <td class="right"><a class="btn ghost small" href="/script">Сценарий</a></td>
+    </tr>
+    <tr>
+      <td>Кому передаёт</td>
+      <td>
+        {% if managers %}<span class="pill ok">{{ managers }}</span>
+        {% else %}<span class="pill warn">ответственные не заданы</span>{% endif %}
+        {% if not operator_chat %}
+        <span class="small" style="color:var(--danger)">чат для уведомлений не задан — менеджер не узнает о передаче</span>
+        {% endif %}
+        {% if not handoff_note.strip() %}
+        <span class="small" style="color:var(--danger)">фраза при передаче пустая — клиент получит тишину</span>
+        {% endif %}
+      </td>
+      <td class="right"><a class="btn ghost small" href="/settings">Менеджеры</a></td>
+    </tr>
+    <tr>
+      <td>Общий выключатель</td>
+      <td>
+        {% if ai_on %}<span class="pill ok">ИИ отвечает клиентам</span>
+        {% else %}<span class="pill off">ИИ выключен — все диалоги идут менеджеру</span>{% endif %}
+      </td>
+      <td class="right"><a class="btn ghost small" href="/settings">Изменить</a></td>
+    </tr>
+  </table>
+</div>
+
+{% if sales_bots %}
+<div class="card">
+  <h2>Кто продаёт <span class="hint">боты с ролью «продажник»</span></h2>
+  <table>
+    <tr><th>Бот</th><th>Канал</th><th style="width:140px">Состояние</th><th style="width:110px"></th></tr>
+    {% for b in sales_bots %}
+    <tr>
+      <td>{{ b.title }}{% if b.username %} <span class="muted small">@{{ b.username }}</span>{% endif %}</td>
+      <td>{{ chan(b.platform) }}</td>
+      <td>
+        {% if b.id in live %}<span class="pill ok">на связи</span>
+        {% elif not b.enabled %}<span class="pill off">выключен</span>
+        {% else %}<span class="pill warn">не поднялся</span>{% endif %}
+      </td>
+      <td class="right"><a class="btn ghost small" href="/bots">Настроить</a></td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+{% endif %}
+
+<div class="card">
+  <h2>Как он себя ведёт</h2>
+  <p class="lead-text" style="margin-bottom:10px">
+    Отвечает коротко и задаёт не больше одного вопроса за сообщение. Говорит
+    только по загруженной информации: цены, сроки и условия не выдумывает.
+    Постепенно собирает имя, контакт, что нужно и к какому сроку — карточка лида
+    заводится сама.
+  </p>
+  <div class="callout">
+    <b>Зовёт человека</b>, когда клиент просит менеджера, готов покупать,
+    жалуется, просит особые условия или задаёт вопрос, ответа на который нет
+    в базе знаний. Тогда ИИ замолкает, приходит уведомление, а в карточке
+    остаётся резюме разговора.
+  </div>
+  {% if greeting %}
+  <p class="muted small" style="margin-top:10px">Приветствие на /start: «{{ greeting }}»</p>
+  {% endif %}
+</div>
+
+{% if health.problems %}
+<div class="card warn">
+  <h2>Самопроверка нашла проблемы</h2>
+  <ul class="small" style="margin:0;padding-left:18px">
+    {% for problem in health.problems %}<li>{{ problem }}</li>{% endfor %}
+  </ul>
+  <p class="muted small" style="margin:10px 0 0">Проверка идёт раз в час,
+    подробности и кнопка «Проверить сейчас» — в <a href="/settings">Настройках</a>.</p>
+</div>
+{% endif %}
+{% endblock %}

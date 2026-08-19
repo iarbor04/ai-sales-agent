@@ -78,9 +78,14 @@
       <div class="sep"></div>
       {% endif %}
 
+      <p class="navgroup">Агент</p>
+      <a href="/agent" class="{{ 'active' if path.startswith('/agent') }}">
+        {{ icon('bot') }}<span class="label">ИИ-продажник</span>
+      </a>
       <a href="/" class="{{ 'active' if path == '/' }}">
         {{ icon('home') }}<span class="label">Обзор</span>
       </a>
+      <p class="navgroup">Работа с клиентами</p>
       <a href="/dialogs" class="{{ 'active' if path.startswith('/dialogs') }}">
         {{ icon('chat') }}<span class="label">Диалоги</span>
         {% if unread %}<span class="badge">{{ unread }}</span>{% endif %}
@@ -93,7 +98,7 @@
         {{ icon('users') }}<span class="label">Лиды</span>
       </a>
 
-      <div class="sep"></div>
+      <p class="navgroup">Чем отвечает</p>
 
       <a href="/knowledge" class="{{ 'active' if path.startswith('/knowledge') }}">
         {{ icon('book') }}<span class="label">База знаний</span>
@@ -101,6 +106,7 @@
       <a href="/script" class="{{ 'active' if path.startswith('/script') }}">
         {{ icon('route') }}<span class="label">Сценарий</span>
       </a>
+      <p class="navgroup">Продвижение</p>
       <a href="/broadcast" class="{{ 'active' if path.startswith('/broadcast') }}">
         {{ icon('send') }}<span class="label">Рассылки</span>
       </a>
@@ -117,7 +123,7 @@
         {{ icon('eye') }}<span class="label">Конкуренты</span>
       </a>
 
-      <div class="sep"></div>
+      <p class="navgroup">Подключения</p>
 
       <a href="/channels" class="{{ 'active' if path.startswith('/channels') }}">
         {{ icon('plug') }}<span class="label">Каналы</span>

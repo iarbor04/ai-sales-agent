@@ -77,7 +77,7 @@ def main() -> int:
     expected = ["/", "/login", "/health", "/dialogs", "/requests", "/leads",
                 "/knowledge", "/broadcast", "/bots", "/script", "/settings",
                 "/settings/ai/check", "/knowledge/file", "/onboarding",
-                "/hook/whatsapp"]
+                "/agent", "/autochains", "/hook/whatsapp"]
     missing = [r for r in expected if r not in routes]
     check(f"маршруты на месте ({len(expected)} шт.)", not missing, ", ".join(missing))
 
@@ -95,6 +95,18 @@ def main() -> int:
           f"шагов: {len(db.script())}")
     check("шагов не больше пяти", len(db.script()) <= 5,
           f"шагов {len(db.script())} — каждый лишний вопрос роняет доходимость")
+
+    section("Агент виден в панели")
+    agent_html = (ROOT / "app/web/templates/agent.html").read_text(encoding="utf-8")
+    base_html = (ROOT / "app/web/templates/base.html").read_text(encoding="utf-8")
+    check("в меню есть раздел агента", '/agent' in base_html and "ИИ-продажник" in base_html)
+    check("раздел агента идёт до рабочих разделов",
+          base_html.index('href="/agent"') < base_html.index('href="/leads"'))
+    check("меню разбито на группы с подписями", base_html.count('class="navgroup"') >= 4)
+    for part in ("Мозг", "Чем отвечает", "Где говорит", "Как ведёт разговор", "Кому передаёт"):
+        check(f"страница агента отвечает на «{part}»", part in agent_html)
+    check("страница агента предупреждает про пустую фразу передачи",
+          "клиент получит тишину" in agent_html)
 
     section("Этапы воронки")
     stage_ids = [row["id"] for row in db.pipeline_stages()]

@@ -599,6 +599,42 @@ async def broadcast_retry(broadcast_id: int):
     return RedirectResponse("/broadcast", status_code=303)
 
 
+# ── агент ──────────────────────────────────────────────────────────────
+
+@app.get("/agent", response_class=HTMLResponse)
+async def agent_page(request: Request):
+    """Кто такой агент и готов ли он к работе.
+
+    Раньше агент был размазан по разделам: кто говорит — в «Ботах», чем
+    отвечает — в «Базе знаний», какой моделью — в «Настройках». Владелец
+    открывал панель и не находил самого продажника. Здесь он собран целиком.
+    """
+    active = providers.current()
+    key_check = await llm.check_key()
+    sales_bots = db.bots(role="sales", only_enabled=False)
+    steps = db.script()
+    kb = knowledge.stats()
+    return page(request, "agent.html",
+                business=db.setting("business_name", ""),
+                tone=db.setting("tone", ""),
+                greeting=db.setting("greeting", ""),
+                handoff_note=db.setting("handoff_note", ""),
+                provider_title=active.TITLE,
+                model=llm.current_model(),
+                key_ready=llm.ai_ready(),
+                key_check=key_check,
+                ai_on=db.setting("ai_enabled_global", "1") == "1",
+                kb=kb,
+                sales_bots=sales_bots,
+                live=channels.live_ids(),
+                live_channels=channels.active(),
+                steps=steps,
+                script_bots=[row for row in sales_bots if row["script_enabled"]],
+                health=healthcheck.last(),
+                managers=db.setting("managers", ""),
+                operator_chat=db.setting("operator_chat_id", ""))
+
+
 # ── автоцепочки ────────────────────────────────────────────────────────
 
 @app.get("/autochains", response_class=HTMLResponse)
