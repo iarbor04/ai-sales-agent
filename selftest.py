@@ -77,7 +77,7 @@ def main() -> int:
     expected = ["/", "/login", "/health", "/dialogs", "/requests", "/leads",
                 "/knowledge", "/broadcast", "/bots", "/script", "/settings",
                 "/settings/ai/check", "/knowledge/file", "/onboarding",
-                "/agent", "/autochains", "/hook/whatsapp"]
+                "/agent", "/agent/prompt/template", "/autochains", "/hook/whatsapp"]
     missing = [r for r in expected if r not in routes]
     check(f"маршруты на месте ({len(expected)} шт.)", not missing, ", ".join(missing))
 
@@ -109,7 +109,7 @@ def main() -> int:
     check("страница агента предупреждает про пустую фразу передачи",
           "клиент получит тишину" in agent_html)
     check("промпт и шаблоны видно в панели",
-          "Что уходит в модель" in agent_html and "Шаблоны сценария" in agent_html)
+          "Промпт агента" in agent_html and "Шаблоны сценария" in agent_html)
 
     # свои правила должны попадать в промпт, но не ломать контракт
     db.set_setting("business_name", "BlackHat")
@@ -122,6 +122,21 @@ def main() -> int:
     check("правила стоят до схемы ответа, а не после",
           prompt.index("ПРАВИЛА КОМПАНИИ") < prompt.index('"reply"'))
     db.set_setting("prompt_extra", "")
+    # промпт целиком редактируется, но форма ответа не теряется
+    db.set_setting("prompt_template", "Ты продавец {business}. Отвечай кратко.")
+    custom = llm_mod.prompt_preview()
+    check("свой промпт применяется", "Ты продавец BlackHat" in custom)
+    check("удалённая форма ответа дописывается сама",
+          '"reply"' in custom and '"handoff"' in custom)
+    db.set_setting("prompt_template", "Свой промпт {business}. {schema}")
+    kept = llm_mod.prompt_preview()
+    check("своя форма ответа не задваивается", kept.count('"step_done"') == 1, str(kept.count('"step_done"')))
+    db.set_setting("prompt_template", "")
+    check("пустая настройка возвращает стандартный промпт",
+          "ГЛАВНОЕ ПРАВИЛО" in llm_mod.prompt_preview())
+    check("страница даёт править промпт целиком",
+          'action="/agent/prompt/template"' in agent_html and "Вернуть стандартный" in agent_html)
+
     check("без своих правил промпт остаётся целым",
           "ПРАВИЛА КОМПАНИИ" not in llm_mod.prompt_preview()
           and '"handoff"' in llm_mod.prompt_preview())

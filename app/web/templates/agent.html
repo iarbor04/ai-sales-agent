@@ -155,15 +155,37 @@
 </div>
 
 <div class="card">
-  <h2>Что уходит в модель <span class="hint">системное сообщение целиком</span></h2>
+  <h2>Промпт агента
+    <span class="hint">{{ 'изменён вами' if prompt_is_custom else 'стандартный' }}</span></h2>
   <p class="lead-text">
-    Собирается из названия компании, тона, ваших правил, этапов воронки и шага
-    сценария. Плюс к этому в каждом запросе идут база знаний по вопросу клиента
-    и последние сообщения переписки.
+    Это инструкция, по которой агент разговаривает. Правьте как хотите — только
+    оставьте на месте подстановки: <code>{{ '{business}' }}</code> название компании,
+    <code>{{ '{tone}' }}</code> тон, <code>{{ '{stages}' }}</code> этапы воронки,
+    <code>{{ '{rules}' }}</code> ваши правила выше, <code>{{ '{schema}' }}</code> форма ответа.
   </p>
-  <details>
-    <summary class="small">Показать промпт ({{ prompt | length }} символов)</summary>
-    <pre class="dump" style="white-space:pre-wrap;margin-top:10px">{{ prompt }}</pre>
+  <form method="post" action="/agent/prompt/template">
+    <div class="field">
+      <textarea name="prompt_template" style="min-height:280px; font-family: var(--mono, monospace); font-size:12px">{{ prompt_template }}</textarea>
+      <span class="note">Если убрать <code>{{ '{schema}' }}</code>, форму ответа допишу сам:
+        без неё модель отвечает свободным текстом, разбор падает и клиент остаётся
+        без ответа. После сохранения сразу проверю промпт живым запросом.</span>
+    </div>
+    <div class="row between">
+      <button class="btn ghost small" type="submit" name="restore" value="1"
+              onclick="return confirm('Вернуть стандартный промпт? Ваши правки пропадут.')">
+        Вернуть стандартный</button>
+      <button class="btn" type="submit">Сохранить и проверить</button>
+    </div>
+  </form>
+
+  <details style="margin-top:14px">
+    <summary class="small">Показать, что уходит в модель после подстановок
+      ({{ prompt | length }} символов)</summary>
+    <p class="muted small" style="margin:8px 0">
+      Плюс к этому в каждом запросе идут база знаний по вопросу клиента и
+      последние сообщения переписки.
+    </p>
+    <pre class="dump" style="white-space:pre-wrap">{{ prompt }}</pre>
   </details>
 </div>
 

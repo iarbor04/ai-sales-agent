@@ -131,6 +131,24 @@ async def check_key(force: bool = False) -> dict:
     return result
 
 
+async def check_prompt() -> dict:
+    """Проверить промпт живым запросом: ответит ли агент и разберётся ли ответ."""
+    try:
+        raw = await _call(render_prompt(), "БАЗА ЗНАНИЙ:\n(пусто)\n\nПЕРЕПИСКА:\n"
+                          "Клиент: здравствуйте\n\nПоследнее сообщение клиента: здравствуйте"
+                          "\n\nОтветь JSON-объектом.", max_tokens=ANSWER_TOKENS)
+    except LLMError as exc:
+        return {"ok": False, "detail": str(exc)}
+    data = _parse(raw)
+    if not data:
+        return {"ok": False, "detail": "модель ответила не по формату — проверьте, "
+                                       "что в промпте осталась форма ответа"}
+    reply = str(data.get("reply") or "").strip()
+    if not reply:
+        return {"ok": False, "detail": "модель вернула пустой ответ клиенту"}
+    return {"ok": True, "reply": reply}
+
+
 async def check_model() -> dict:
     """Живой пробный запрос выбранной моделью — то же, что делает агент."""
     model = current_model()
@@ -197,18 +215,12 @@ def _script_block(contact_id: int) -> str:
     )
 
 
-def _system_prompt() -> str:
-    business = db.setting("business_name", "").strip()
-    tone = db.setting("tone", "").strip()
-    known = ", ".join(db.stage_titles().values())
-
-    # Свои правила владельца встают между поведением и схемой ответа: так он
-    # может добавить что угодно про свой бизнес, но не сломает формат JSON и не
-    # отменит передачу менеджеру — без них агент перестаёт отвечать вовсе.
-    extra = db.setting("prompt_extra", "").strip()
-    own = f"\n\nПРАВИЛА КОМПАНИИ (важнее общих советов выше):\n{extra}" if extra else ""
-
-    return f"""Ты — продавец-консультант компании {business or "клиента"}.
+# Промпт по умолчанию. Владелец правит его целиком в панели, поэтому текст —
+# шаблон с подстановками, а не склейка строк в коде:
+#   {business} {tone} {stages} — из настроек и воронки
+#   {rules}                    — правила компании, если заданы
+#   {schema}                   — форма ответа; без неё агент не сможет ответить
+DEFAULT_PROMPT = """Ты — продавец-консультант компании {business}.
 Общаешься с клиентом в мессенджере от лица компании.
 
 ГЛАВНОЕ ПРАВИЛО: отвечай ТОЛЬКО по информации из блока «БАЗА ЗНАНИЙ».
@@ -217,7 +229,7 @@ def _system_prompt() -> str:
 словами, а ставь handoff = true.
 
 Как вести разговор:
-- Пиши коротко, {tone or "по-человечески и по делу"}. Два-три предложения.
+- Пиши коротко, {tone}. Два-три предложения.
 - За одно сообщение задавай НЕ БОЛЬШЕ ОДНОГО вопроса.
 - Отвечай на языке клиента.
 - Постепенно собери: имя, контакт, что нужно, к какому сроку, комментарий.
@@ -237,10 +249,44 @@ def _system_prompt() -> str:
 - задал вопрос, ответа на который нет в базе знаний.
 
 В поля fields клади только то, что клиент сказал явно. Ничего не додумывай.
-Пустое поле — пустая строка. Статусы лида в системе: {known}.{own}
+Пустое поле — пустая строка. Статусы лида в системе: {stages}.{rules}
 
 Ответ верни СТРОГО одним JSON-объектом такой формы, без markdown и пояснений:
-{ANSWER_SCHEMA}"""
+{schema}"""
+
+# Метка формы ответа. Если владелец её удалил, дописываем сами: без схемы
+# модель отвечает свободным текстом, разбор падает, и клиент остаётся без ответа.
+SCHEMA_MARK = "{schema}"
+
+
+def prompt_template() -> str:
+    """Шаблон промпта: свой из панели или стандартный."""
+    return db.setting("prompt_template", "").strip() or DEFAULT_PROMPT
+
+
+def render_prompt(template: str | None = None) -> str:
+    """Подставить в шаблон название, тон, этапы и правила компании."""
+    business = db.setting("business_name", "").strip() or "клиента"
+    tone = db.setting("tone", "").strip() or "по-человечески и по делу"
+    stages = ", ".join(db.stage_titles().values())
+    extra = db.setting("prompt_extra", "").strip()
+    rules = f"\n\nПРАВИЛА КОМПАНИИ (важнее общих советов выше):\n{extra}" if extra else ""
+
+    text = template if template is not None else prompt_template()
+    if SCHEMA_MARK not in text:
+        text = text.rstrip() + (
+            "\n\nОтвет верни СТРОГО одним JSON-объектом такой формы, "
+            "без markdown и пояснений:\n" + SCHEMA_MARK)
+
+    for mark, value in (("{business}", business), ("{tone}", tone),
+                        ("{stages}", stages), ("{rules}", rules),
+                        (SCHEMA_MARK, ANSWER_SCHEMA)):
+        text = text.replace(mark, value)
+    return text
+
+
+def _system_prompt() -> str:
+    return render_prompt()
 
 
 def prompt_preview(contact_id: int | None = None) -> str:

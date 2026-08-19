@@ -616,6 +616,8 @@ async def agent_page(request: Request):
     kb = knowledge.stats()
     return page(request, "agent.html",
                 prompt=llm.prompt_preview(),
+                prompt_template=llm.prompt_template(),
+                prompt_is_custom=bool(db.setting("prompt_template", "").strip()),
                 prompt_extra=db.setting("prompt_extra", ""),
                 templates_list=[{"key": key, "title": item["title"],
                                  "hint": item.get("hint", ""),
@@ -643,11 +645,7 @@ async def agent_page(request: Request):
 
 @app.post("/agent/prompt")
 async def agent_prompt(request: Request):
-    """Свои правила компании для промпта.
-
-    Меняем только этот блок: поведение при передаче менеджеру и формат ответа
-    остаются в коде — их правка ломает агента целиком, и мы это уже видели.
-    """
+    """Свои правила компании для промпта."""
     form = await request.form()
     text = str(form.get("prompt_extra") or "").strip()
     if len(text) > 4000:
@@ -656,6 +654,49 @@ async def agent_prompt(request: Request):
             status_code=303)
     db.set_setting("prompt_extra", text)
     note = "Правила сохранены — агент учтёт их в следующем ответе" if text else "Правила очищены"
+    return RedirectResponse("/agent?ok=" + quote(note), status_code=303)
+
+
+@app.post("/agent/prompt/template")
+async def agent_prompt_template(request: Request):
+    """Промпт целиком: владелец правит его сам.
+
+    Форму ответа не отнимаем: если её удалили, дописываем сами и говорим об
+    этом. Без неё модель отвечает свободным текстом, разбор падает и клиент
+    остаётся без ответа — ровно эту поломку мы уже разбирали.
+    """
+    form = await request.form()
+    if form.get("restore"):
+        db.set_setting("prompt_template", "")
+        return RedirectResponse("/agent?ok=" + quote("Вернул стандартный промпт"),
+                                status_code=303)
+
+    text = str(form.get("prompt_template") or "").strip()
+    if len(text) < 40:
+        return RedirectResponse(
+            "/agent?error=" + quote("Промпт слишком короткий — агенту не с чем работать"),
+            status_code=303)
+    if len(text) > 20000:
+        return RedirectResponse(
+            "/agent?error=" + quote("Промпт длиннее 20000 символов"), status_code=303)
+
+    added_schema = llm.SCHEMA_MARK not in text
+    db.set_setting("prompt_template", text)
+
+    # Сразу проверяем новым промптом на живом запросе: сломанный промпт должен
+    # обнаружиться здесь, а не на первом клиенте.
+    note = "Промпт сохранён"
+    if added_schema:
+        note += ". Форму ответа вы убрали — я дописал её в конец, иначе агент замолчит"
+    if llm.ai_ready():
+        probe = await llm.check_prompt()
+        if probe["ok"]:
+            note += f". Проверка прошла: агент ответил «{probe['reply'][:60]}»"
+            return RedirectResponse("/agent?ok=" + quote(note), status_code=303)
+        return RedirectResponse(
+            "/agent?error=" + quote(note + f". Но проверка не прошла: {probe['detail']}."
+                                    " Кнопка «Вернуть стандартный» рядом"),
+            status_code=303)
     return RedirectResponse("/agent?ok=" + quote(note), status_code=303)
 
 
