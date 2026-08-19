@@ -3,7 +3,10 @@
 set -uo pipefail
 
 APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SERVICE=ai-sales
+# Имя службы принадлежит установке, а не скрипту: на машине бывает несколько
+# копий, и каждая должна управлять своей. install.sh пишет его в .env.
+SERVICE=${SERVICE:-$(grep -E '^SERVICE_NAME=' "$APP_DIR/.env" 2>/dev/null | cut -d= -f2 | tr -d ' ')}
+SERVICE=${SERVICE:-ai-sales}
 PORT=$(grep -E '^PORT=' "$APP_DIR/.env" 2>/dev/null | cut -d= -f2 | tr -d ' ' || true)
 PORT=${PORT:-8000}
 

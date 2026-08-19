@@ -66,6 +66,13 @@ if [ -n "$BUSY_PID" ] && ! systemctl show -p MainPID --value "$SERVICE" 2>/dev/n
   exit 1
 fi
 
+# Запоминаем имя службы в установке, чтобы остальные скрипты управляли своей.
+if grep -qE '^SERVICE_NAME=' "$APP_DIR/.env"; then
+  sed -i "s#^SERVICE_NAME=.*#SERVICE_NAME=$SERVICE#" "$APP_DIR/.env"
+else
+  printf '\n# Имя службы systemd этой установки.\nSERVICE_NAME=%s\n' "$SERVICE" >> "$APP_DIR/.env"
+fi
+
 echo "== служба systemd"
 $SUDO tee /etc/systemd/system/$SERVICE.service >/dev/null <<UNIT
 [Unit]

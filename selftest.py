@@ -281,6 +281,9 @@ def main() -> int:
     install_sh = (ROOT / "deploy/install.sh").read_text(encoding="utf-8")
     check("установка не перезаписывает службу другой установки",
           "уже обслуживает" in install_sh and "SERVICE=${SERVICE:-ai-sales}" in install_sh)
+    check("имя службы принадлежит установке, а не скрипту",
+          all("SERVICE_NAME=" in (ROOT / f"deploy/{name}").read_text(encoding="utf-8")
+              for name in ("install.sh", "status.sh", "deploy.sh", "reset.sh")))
     check("установка ловит занятый порт до запуска",
           "порт $PORT_WANTED уже занят" in install_sh)
     check("статус сверяет владельца порта со службой",
