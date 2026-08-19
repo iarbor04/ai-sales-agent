@@ -269,6 +269,17 @@ def main() -> int:
     example = (ROOT / ".env.example").read_text(encoding="utf-8")
     check("пример .env не обещает лишних переменных",
           "SHEETS_SYNC_MINUTES" not in example and "OPENROUTER_MODEL" in example)
+    reset_sh = (ROOT / "deploy/reset.sh").read_text(encoding="utf-8")
+    check("сброс требует подтверждения словом", 'ANSWER" = "СБРОС' in reset_sh)
+    check("сброс делает бэкап перед удалением",
+          reset_sh.index("deploy/backup.sh") < reset_sh.index("rm -f"))
+    check("сброс стирает и вложения, и базу",
+          'rm -rf "$MEDIA"' in reset_sh and 'rm -f "$DB"' in reset_sh)
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    for feature in ("Автоцепочки", "YandexGPT", "Самопроверка", "reset.sh", "DOCX"):
+        check(f"README рассказывает про «{feature}»", feature in readme)
+    check("README не обещает PDF", "PDF в базу знаний не грузится" in readme)
+
     check("сторонних зависимостей ровно восемь",
           len([line for line in (ROOT / "requirements.txt").read_text(encoding="utf-8").splitlines()
                if line.strip()]) == 8)
