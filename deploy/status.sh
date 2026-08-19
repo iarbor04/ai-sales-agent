@@ -26,10 +26,20 @@ else
   VERSION="неизвестна — каталог не подключён к репозиторию"
 fi
 
+# На порту может отвечать что угодно — другой сервис на той же машине тоже
+# вернёт JSON. Убеждаемся, что это наш /health, иначе «здоровье ок» соврёт.
+case "$HEALTH" in
+  *'"ok":true'*'"model"'*)
+    echo "СЛУЖБА: $STATE | ВЕРСИЯ: $VERSION"
+    echo "ЗДОРОВЬЕ: ок | $HEALTH"
+    exit 0
+    ;;
+esac
+
 if [ -n "$HEALTH" ]; then
   echo "СЛУЖБА: $STATE | ВЕРСИЯ: $VERSION"
-  echo "ЗДОРОВЬЕ: ок | $HEALTH"
-  exit 0
+  echo "ЗДОРОВЬЕ: на порту $PORT отвечает не наша служба: $(echo "$HEALTH" | cut -c1-60)"
+  exit 1
 fi
 
 echo "СЛУЖБА: $STATE | ВЕРСИЯ: $VERSION"

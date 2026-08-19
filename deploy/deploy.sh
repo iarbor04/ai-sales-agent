@@ -9,6 +9,15 @@ SERVICE=ai-sales
 
 cd "$APP_DIR"
 
+# Скрипты управляют службой systemd по имени, а не по каталогу. Если запустить
+# их из копии проекта, они дёрнут службу настоящей установки — и та встанет
+# или перезапустится вместе с чужой базой. Поэтому сверяем, тот ли это каталог.
+service_owns_dir() {
+  local dir
+  dir=$(systemctl show -p WorkingDirectory --value "$SERVICE" 2>/dev/null || true)
+  [ -n "$dir" ] && [ "$dir" = "$APP_DIR" ]
+}
+
 echo "== бэкап базы перед обновлением"
 bash deploy/backup.sh >/dev/null 2>&1 || echo "   базы ещё нет, пропускаем"
 
@@ -52,6 +61,15 @@ fi
 
 echo "== зависимости"
 .venv/bin/pip install -q -r requirements.txt
+
+if ! service_owns_dir; then
+  echo
+  echo "ОСТАНОВКА: служба $SERVICE обслуживает другой каталог."
+  echo "Похоже, вы запустили деплой из копии проекта. Перезапуск тронул бы"
+  echo "настоящую установку, поэтому останавливаюсь. Разворачивайте копию"
+  echo "отдельной службой через deploy/install.sh."
+  exit 1
+fi
 
 echo "== перезапуск"
 $SUDO systemctl restart $SERVICE

@@ -273,6 +273,13 @@ def main() -> int:
     check("сброс требует подтверждения словом", 'ANSWER" = "СБРОС' in reset_sh)
     check("сброс делает бэкап перед удалением",
           reset_sh.index("deploy/backup.sh") < reset_sh.index("rm -f"))
+    check("скрипты не дёргают службу чужого каталога",
+          all("service_owns_dir" in (ROOT / f"deploy/{name}").read_text(encoding="utf-8")
+              for name in ("reset.sh", "deploy.sh")))
+    check("деплой из копии останавливается, а не перезапускает чужую службу",
+          "обслуживает другой каталог" in deploy_sh and deploy_sh.count("exit 1") >= 2)
+    check("статус не принимает чужой ответ на порту за свой",
+          '"ok":true' in status_sh and "отвечает не наша служба" in status_sh)
     check("сброс стирает и вложения, и базу",
           'rm -rf "$MEDIA"' in reset_sh and 'rm -f "$DB"' in reset_sh)
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
