@@ -278,6 +278,9 @@ def main() -> int:
               for name in ("reset.sh", "deploy.sh")))
     check("деплой из копии останавливается, а не перезапускает чужую службу",
           "обслуживает другой каталог" in deploy_sh and deploy_sh.count("exit 1") >= 2)
+    install_sh = (ROOT / "deploy/install.sh").read_text(encoding="utf-8")
+    check("установка не перезаписывает службу другой установки",
+          "уже обслуживает" in install_sh and "SERVICE=${SERVICE:-ai-sales}" in install_sh)
     check("статус не принимает чужой ответ на порту за свой",
           '"ok":true' in status_sh and "отвечает не наша служба" in status_sh)
     check("сброс стирает и вложения, и базу",

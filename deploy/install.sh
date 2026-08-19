@@ -7,8 +7,22 @@
 set -euo pipefail
 
 APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SERVICE=ai-sales
+# Имя службы можно переопределить: на одной машине бывает несколько установок,
+# и вторая не должна занимать имя первой.
+#   SERVICE=ai-sales-demo bash deploy/install.sh
+SERVICE=${SERVICE:-ai-sales}
 PYTHON=python3
+
+# Если служба с таким именем уже обслуживает другой каталог, установка молча
+# переписала бы её unit, и работающая установка начала бы запускать чужой код.
+EXISTING=$(systemctl show -p WorkingDirectory --value "$SERVICE" 2>/dev/null || true)
+if [ -n "$EXISTING" ] && [ "$EXISTING" != "$APP_DIR" ]; then
+  echo "ОСТАНОВКА: служба $SERVICE уже обслуживает $EXISTING."
+  echo "Установка перезаписала бы её и увела работающий сервис на этот каталог."
+  echo "Задайте другое имя, если это вторая установка на машине:"
+  echo "  SERVICE=$SERVICE-2 bash deploy/install.sh"
+  exit 1
+fi
 
 echo "== установка в $APP_DIR"
 
