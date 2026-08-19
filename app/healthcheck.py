@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 
 from . import channels, config, db, llm, notify
 
@@ -24,13 +25,17 @@ async def run() -> dict:
     """Собрать состояние. Ничего не чинит и никого не будит — только смотрит."""
     problems: list[str] = []
 
-    live = set(channels.live_ids())
+    # Живые боты — это объекты в памяти службы. Из отдельного процесса их не
+    # видно, и наивная проверка объявила бы мёртвыми вообще всех.
+    inside_service = db.setting("service_pid", "") == str(os.getpid())
     configured = db.bots(only_enabled=True)
-    dead = [row["title"] for row in configured if row["id"] not in live]
     if not configured:
         problems.append("не подключён ни один бот — клиентам некуда писать")
-    elif dead:
-        problems.append("боты не на связи: " + ", ".join(dead))
+    elif inside_service:
+        live = set(channels.live_ids())
+        dead = [row["title"] for row in configured if row["id"] not in live]
+        if dead:
+            problems.append("боты не на связи: " + ", ".join(dead))
 
     if not llm.ai_ready():
         problems.append("не задан ключ модели — агент молчит и зовёт менеджера")
@@ -62,6 +67,8 @@ async def run() -> dict:
         "problems": problems,
         "channels": channels.active(),
         "mode": config.MODE,
+        # снаружи службы часть проверок недоступна — честно помечаем
+        "full": inside_service,
     }
     db.set_setting(STATE_KEY, json.dumps(state, ensure_ascii=False))
     return state

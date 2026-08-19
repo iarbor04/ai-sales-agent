@@ -191,11 +191,30 @@ def main() -> int:
 
         state = await healthcheck.run()
         problems = " | ".join(state["problems"])
-        check("пустая установка честно называет свои дыры",
-              any("бот" in p for p in state["problems"])
-              and any("ключ модели" in p for p in state["problems"]), problems)
+        check("проверка называет незаполненное",
+              any("ключ модели" in p for p in state["problems"])
+              and any("чат менеджера" in p for p in state["problems"]), problems)
+
+        db.run("UPDATE bots SET enabled = 0")
+        without = await healthcheck.run()
+        check("без ботов проверка говорит, что клиентам некуда писать",
+              any("ни один бот" in p for p in without["problems"]),
+              " | ".join(without["problems"]))
+        db.run("UPDATE bots SET enabled = 1")
+
+        fresh = await healthcheck.run()
         check("результат сохраняется для панели",
-              healthcheck.last().get("problems") == state["problems"])
+              healthcheck.last().get("problems") == fresh["problems"],
+              f"в базе {healthcheck.last().get('problems')}")
+
+        # запуск не из службы не должен объявлять живых ботов мёртвыми
+        db.add_bot("Живой", "111:AA", role="sales")
+        db.set_setting("service_pid", "-1")
+        outside = await healthcheck.run()
+        check("вне службы проверка не хоронит ботов",
+              not any("не на связи" in p for p in outside["problems"])
+              and outside["full"] is False, " | ".join(outside["problems"]))
+        db.run("DELETE FROM bots WHERE title = 'Живой'")
 
         # уведомление уходит только при изменении набора проблем
         alerts = []

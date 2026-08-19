@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 
 from . import (autochain, booking, broadcast, config, db, healthcheck, knowledge,
                 retrieval, rivals, sheets)
@@ -99,6 +100,9 @@ async def _sync_sheets() -> None:
 
 
 async def _loop() -> None:
+    # Пометка процесса: живость ботов видна только внутри службы, и проверка
+    # должна отличать себя от запуска из командной строки.
+    db.set_setting("service_pid", str(os.getpid()))
     log.info("планировщик запущен, тик %s сек", config.TICK_SECONDS)
     while True:
         try:
