@@ -67,8 +67,11 @@ fi
 PASSWORD=$(get_env ADMIN_PASSWORD)
 case "$PASSWORD" in
   ""|admin|смените-обязательно)
-    # 12 символов без похожих друг на друга: пароль диктуют голосом и в чат
-    PASSWORD=$(LC_ALL=C tr -dc 'A-HJ-NP-Za-km-z2-9' < /dev/urandom | head -c 12)
+    # Читаем ровно 8 байт и переводим в hex. Соблазнительный вариант
+    #   tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 12
+    # под `set -euo pipefail` убивает скрипт: head закрывает пайп, tr получает
+    # SIGPIPE, код 141, установка молча обрывается. Проверено на живом сервере.
+    PASSWORD=$(od -An -tx1 -N 8 /dev/urandom | tr -d ' \n')
     set_env ADMIN_PASSWORD "$PASSWORD"
     NEW_PASSWORD=1
     ;;

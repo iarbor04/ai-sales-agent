@@ -467,6 +467,22 @@ def main() -> int:
     check("установщик сам задаёт пароль, секрет и адрес панели",
           all(f'set_env {key}' in install_sh
               for key in ("ADMIN_PASSWORD", "SECRET_KEY", "PUBLIC_URL")))
+    # Исполняем настоящие строки установщика под теми же флагами. Ровно так
+    # `tr -dc ... | head -c 12` убивал установку кодом 141: head закрывал пайп,
+    # tr получал SIGPIPE, и «install.sh молча оборвался» никто бы не связал с
+    # генерацией пароля. Поиск подстроки такое не ловит.
+    def run_snippet(marker: str) -> str:
+        import subprocess
+        line = next(l.strip() for l in install_sh.splitlines() if l.strip().startswith(marker))
+        code = f"set -euo pipefail\n{line}\nprintf '%s' \"${{{marker.split('=')[0]}}}\""
+        out = subprocess.run(["bash", "-c", code], capture_output=True, text=True)
+        return out.stdout if out.returncode == 0 else f"код выхода {out.returncode}"
+
+    password = run_snippet("PASSWORD=$(")
+    check("пароль генерируется, а не роняет установку", len(password) >= 12, password)
+    check("в установщике не осталось пайпов в head — они дают SIGPIPE",
+          "| head -c" not in install_sh)
+
     check("установщик печатает доступы, а не оставляет их искать",
           "ГОТОВО" in install_sh and "Логин:" in install_sh and "Пароль:" in install_sh)
     check("повторная установка не меняет заданный пароль",
