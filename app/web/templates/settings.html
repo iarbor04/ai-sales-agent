@@ -40,123 +40,22 @@
   {% endif %}
 </div>
 
+<div class="card">
+  <h2>Настройка агента переехала</h2>
+  <p class="lead-text" style="margin:0">
+    Модель и ключ, база знаний, сценарий, тон и передача менеджеру собраны в
+    одном месте — <a href="/agent">ИИ-продажник</a>. Здесь осталось служебное.
+  </p>
+</div>
+
 <form method="post" action="/settings">
-  <div class="card">
-    <h2>О бизнесе</h2>
-    <div class="row">
-      <div class="field"><label>Название</label>
-        <input type="text" name="business_name" value="{{ values.business_name }}"></div>
-      <div class="field"><label>Сайт</label>
-        <input type="text" name="business_site" value="{{ values.business_site }}"
-               placeholder="example.com">
-        <span class="note">Сохраните — агент сам обойдёт страницы и положит их
-          в <a href="/knowledge">Базу знаний</a>. Там же видно, что загрузилось,
-          и можно выкинуть лишнее.</span></div>
-    </div>
-    <div class="field"><label>Приветствие на /start</label>
-      <textarea name="greeting">{{ values.greeting }}</textarea></div>
-    <div class="field"><label>Тон общения</label>
-      <input type="text" name="tone" value="{{ values.tone }}"
-        placeholder="дружелюбный, короткий, по делу"></div>
-  </div>
-
-  <div class="card">
-    <h2>Модель</h2>
-    <div class="field">
-      <label>Кто отвечает клиентам</label>
-      <div class="lang-tabs">
-        {% for item in providers %}
-        <button type="button" class="lang-tab provider-tab {{ 'on' if provider == item.name }}"
-                data-provider="{{ item.name }}">
-          {{ item.title }}{% if item.configured %}<i class="filled"></i>{% endif %}
-        </button>
-        {% endfor %}
-      </div>
-      <input type="hidden" name="model_provider" id="model-provider" value="{{ provider }}">
-    </div>
-
-    {% for item in providers %}
-    <div class="provider-pane" data-provider="{{ item.name }}"
-         {{ '' if provider == item.name else 'hidden' }}>
-      <p class="note">{{ item.help }}</p>
-      {% for field in item.fields %}
-      <div class="field">
-        <label>{{ field.label }}</label>
-        <input type="{{ 'password' if field.secret else 'text' }}" name="{{ field.key }}"
-               autocomplete="off" data-lpignore="true"
-               value="{{ '' if field.secret else values.get(field.key, '') }}"
-               placeholder="{% if field.secret and values.get(field.key) %}сохранено — впишите новое, чтобы заменить{% else %}{{ field.hint }}{% endif %}">
-      </div>
-      {% endfor %}
-      {% if item.name == 'openrouter' and ai_ready and provider == 'openrouter' %}
-      <label class="check"><input type="checkbox" name="drop_key">
-        <span>удалить сохранённый ключ</span></label>
-      {% endif %}
-    </div>
-    {% endfor %}
-    {% if ai_ready %}<p class="note">Доступ к {{ provider_title }}: {{ key_source }}.</p>{% endif %}
-    <div class="field">
-      <label>Модель для ответов</label>
-      <select name="model" id="mselect">
-        {% for m in models %}
-        <option value="{{ m.id }}" {{ 'selected' if values.model == m.id }}>{{ m.id }}</option>
-        {% else %}
-        <option value="{{ values.model }}" selected>{{ values.model }}</option>
-        {% endfor %}
-      </select>
-      <span class="note" id="mcount">
-        {% if models %}Доступно моделей: {{ models | length }}.
-        {% else %}Список подгрузится, как только сохраните ключ.{% endif %}
-        Дешевле и быстрее — модели с пометкой mini или flash.
-      </span>
-    </div>
-    <div class="row" style="margin-bottom:12px">
-      <button class="btn ghost small" type="button" onclick="checkAi()">Проверить ключ и модель</button>
-    </div>
-    <p class="note" id="aiout">
-      {% if key_check %}Ключ: {{ key_check.detail }}.{% endif %}
-      Проверка отправляет один короткий запрос выбранной моделью — то же, что делает агент.
-    </p>
-    <label class="check">
-      <input type="checkbox" name="ai_enabled_global"
-        {{ 'checked' if values.ai_enabled_global == '1' }}>
-      <span>ИИ отвечает клиентам</span>
-    </label>
-    <p class="muted small">Снятая галочка — общий стоп: все новые диалоги идут сразу менеджеру.</p>
-  </div>
-
-  <div class="card">
-    <h2>Менеджеры</h2>
-    <div class="field"><label>Chat ID для уведомлений</label>
-      <input type="text" name="operator_chat_id" value="{{ values.operator_chat_id }}"></div>
-    <p class="muted small">
-      Искать ID не нужно: добавьте бота в рабочую группу и напишите там —
-      уведомления пойдут туда. Для личных сообщений подойдёт ваш ID.
-    </p>
-    <div class="field"><label>Список менеджеров через запятую</label>
-      <input type="text" name="managers" value="{{ values.managers }}"
-        placeholder="Анна, Игорь, Пётр"></div>
-    <p class="muted small">Ответственный назначается по кругу, чтобы лиды не падали на одного.</p>
-    <div class="field"><label>Что агент пишет клиенту при передаче</label>
-      <textarea name="handoff_note" placeholder="Передаю вас менеджеру, он ответит здесь же.">{{ values.handoff_note }}</textarea>
-      {% if not values.handoff_note.strip() %}
-      <span class="note" style="color:var(--danger)">
-        Поле пустое: при передаче менеджеру клиент не получит ничего, и разговор
-        для него просто оборвётся. Впишите фразу, если это не то, чего вы хотите.
-      </span>
-      {% else %}
-      <span class="note">Эту фразу клиент увидит в момент передачи. Пустое поле — клиент не получит ничего.</span>
-      {% endif %}
-    </div>
-  </div>
-
   <div class="card">
     <h2>Выгрузка лидов в Google Таблицу <span class="hint">по желанию</span></h2>
     <p class="lead-text">
       Лиды и так видны в разделе «Лиды». Это на случай, если отделу удобнее
       работать в таблице: строки обновляются на месте, дублей не будет.
-      Прайс и другие таблицы знаний загружают файлом в разделе
-      <a href="/knowledge">База знаний</a>.
+      Прайс и другие таблицы знаний загружают файлом на вкладке
+      <a href="/agent#kb">«База знаний»</a>.
     </p>
     <div class="row formgap">
       <div class="field"><label>Идентификатор таблицы</label>

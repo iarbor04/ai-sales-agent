@@ -388,18 +388,10 @@ async def lead_save(request: Request):
 
 # ── база знаний ────────────────────────────────────────────────────────
 
-@app.get("/knowledge", response_class=HTMLResponse)
-async def kb_page(request: Request):
-    pages = db.q(
-        f"SELECT * FROM kb_pages WHERE {knowledge.WEB_PAGES}"
-        " ORDER BY included DESC, chars DESC, url LIMIT 500"
-    )
-    last = db.setting("kb_last_refresh", "")
-    return page(request, "knowledge.html", pages=pages, stats=knowledge.stats(),
-                site=db.setting("business_site", ""), extra=db.setting("kb_extra", ""),
-                files=knowledge.uploads(),
-                refresh_hours=db.setting("kb_refresh_hours", "24"),
-                last_refresh=int(last) if last.isdigit() else 0)
+@app.get("/knowledge")
+async def kb_page():
+    """База знаний теперь вкладка на странице агента — вся настройка в одном окне."""
+    return RedirectResponse("/agent#kb", status_code=303)
 
 
 @app.post("/knowledge/refresh")
@@ -408,7 +400,7 @@ async def kb_refresh(request: Request):
     result = await asyncio.to_thread(knowledge.refresh)
     retrieval.invalidate()
     return RedirectResponse(
-        f"/knowledge?changed={result['changed']}&gone={result['gone']}",
+        f"/agent?changed={result['changed']}&gone={result['gone']}#kb",
         status_code=303,
     )
 
@@ -416,7 +408,7 @@ async def kb_refresh(request: Request):
 @app.post("/knowledge/schedule")
 async def kb_schedule(hours: str = Form("24")):
     db.set_setting("kb_refresh_hours", hours.strip() or "24")
-    return RedirectResponse("/knowledge", status_code=303)
+    return RedirectResponse("/agent#kb", status_code=303)
 
 
 @app.post("/knowledge/file")
@@ -443,7 +435,7 @@ async def kb_file(request: Request):
             result = await asyncio.to_thread(docfile.save, name, data)
     except (pricefile.PriceFileError, docfile.DocumentError) as exc:
         # Неудача не трогает уже загруженное: прежняя версия остаётся в базе знаний.
-        return RedirectResponse("/knowledge?error=" + quote(f"Файл не прочитан: {exc}"),
+        return RedirectResponse("/agent?error=" + quote(f"Файл не прочитан: {exc}") + "#kb",
                                 status_code=303)
 
     if table:
@@ -452,22 +444,42 @@ async def kb_file(request: Request):
             note += " Внутренние столбцы агенту не показаны: " + ", ".join(result["hidden"]) + "."
     else:
         note = f"Из документа «{name}» прочитано символов: {result['chars']}."
-    return RedirectResponse("/knowledge?ok=" + quote(note), status_code=303)
+    return RedirectResponse("/agent?ok=" + quote(note) + "#kb", status_code=303)
 
 
 @app.post("/knowledge/file/{page_id}/delete")
 async def kb_file_delete(page_id: int):
     knowledge.remove_upload(page_id)
-    return RedirectResponse("/knowledge?ok=" + quote("Файл убран из базы знаний"),
+    return RedirectResponse("/agent?ok=" + quote("Файл убран из базы знаний") + "#kb",
                             status_code=303)
+
+
+async def _load_pending() -> None:
+    """Дочитать найденные страницы фоном: обход занимает до пары минут."""
+    try:
+        loaded = await asyncio.to_thread(knowledge.fetch_pending)
+        retrieval.invalidate()
+        log.info("страницы сайта дочитаны: %s", loaded.get("loaded", 0))
+    except Exception as exc:  # noqa: BLE001 — фон не должен ронять службу
+        log.warning("страницы сайта не дочитались: %s", exc)
 
 
 @app.post("/knowledge/discover")
 async def kb_discover(site: str = Form(...)):
-    """Найти внутренние страницы сайта. Текст пока не грузим."""
-    db.set_setting("business_site", site.strip())
-    await asyncio.to_thread(knowledge.discover, site.strip())
-    return RedirectResponse("/knowledge", status_code=303)
+    """Найти страницы сайта и сразу начать их читать.
+
+    Раньше поле сайта жило в настройках и запускало полное чтение, а здесь
+    находились только адреса — тексты приходилось грузить вторым шагом. После
+    объединения страниц осталась одна форма, и она делает всё сразу: иначе
+    владелец сохраняет сайт и ждёт, что агент его прочитает, а тот молчит.
+    """
+    site = site.strip()
+    db.set_setting("business_site", site)
+    found = await asyncio.to_thread(knowledge.discover, site)
+    asyncio.create_task(_load_pending())
+    note = (f"Нашёл страниц: {found.get('found', 0)} — читаю их, "
+            "через минуту-другую появятся тексты")
+    return RedirectResponse(_back({}, "/agent#kb", ok=note), status_code=303)
 
 
 @app.post("/knowledge/select")
@@ -480,7 +492,7 @@ async def kb_select(request: Request):
                (1 if row["id"] in keep else 0, row["id"]))
     await asyncio.to_thread(knowledge.fetch_pending)
     retrieval.invalidate()
-    return RedirectResponse("/knowledge", status_code=303)
+    return RedirectResponse("/agent#kb", status_code=303)
 
 
 @app.post("/knowledge/extra")
@@ -489,7 +501,7 @@ async def kb_extra(text: str = Form("")):
     db.set_setting("kb_extra", text)
     knowledge.reindex_extra()
     retrieval.invalidate()
-    return RedirectResponse("/knowledge", status_code=303)
+    return RedirectResponse("/agent#kb", status_code=303)
 
 
 @app.get("/knowledge/test")
@@ -602,19 +614,43 @@ async def broadcast_retry(broadcast_id: int):
 # ── агент ──────────────────────────────────────────────────────────────
 
 @app.get("/agent", response_class=HTMLResponse)
-async def agent_page(request: Request):
-    """Кто такой агент и готов ли он к работе.
+async def agent_page(request: Request, bot: int | None = None):
+    """Вся настройка продажника одной страницей.
 
     Раньше агент был размазан по разделам: кто говорит — в «Ботах», чем
-    отвечает — в «Базе знаний», какой моделью — в «Настройках». Владелец
-    открывал панель и не находил самого продажника. Здесь он собран целиком.
+    отвечает — в «Базе знаний», какой моделью — в «Настройках», как ведёт
+    разговор — в «Сценарии». Владелец ходил по пяти адресам и терял нитку.
+    Теперь всё здесь, вкладками; отдельно остались только каналы — там
+    подключение, а не настройка.
     """
     active = providers.current()
     key_check = await llm.check_key()
     sales_bots = db.bots(role="sales", only_enabled=False)
     steps = db.script()
     kb = knowledge.stats()
+    kb_last = db.setting("kb_last_refresh", "")
     return page(request, "agent.html",
+                # база знаний
+                kb_pages=db.q(
+                    f"SELECT * FROM kb_pages WHERE {knowledge.WEB_PAGES}"
+                    " ORDER BY included DESC, chars DESC, url LIMIT 500"),
+                kb_files=knowledge.uploads(),
+                kb_site=db.setting("business_site", ""),
+                kb_extra=db.setting("kb_extra", ""),
+                kb_refresh_hours=db.setting("kb_refresh_hours", "24"),
+                kb_last_refresh=int(kb_last) if kb_last.isdigit() else 0,
+                # сценарий: общий и у каждого бота свой
+                script_steps=db.q(
+                    "SELECT * FROM script_steps WHERE bot_id IS ? ORDER BY position",
+                    (bot,)),
+                script_bot_id=bot,
+                script_templates=db.SCRIPT_TEMPLATES,
+                lead_fields=db.LEAD_FIELDS,
+                # модель
+                models=await llm.available_models(),
+                provider=active.NAME,
+                providers_list=providers.options(),
+                key_source=_key_source(),
                 checklist=onboarding.progress(),
                 agent_role=db.setting("agent_role", ""),
                 reply_length=db.setting("reply_length", "short"),
@@ -660,7 +696,7 @@ async def agent_prompt(request: Request):
     text = str(form.get("prompt_extra") or "").strip()
     if len(text) > 4000:
         return RedirectResponse(
-            "/agent?error=" + quote("Правила длиннее 4000 символов — модель начнёт их путать"),
+            "/agent?error=" + quote("Правила длиннее 4000 символов — модель начнёт их путать") + "#talk",
             status_code=303)
 
     db.set_setting("prompt_extra", text)
@@ -681,7 +717,8 @@ async def agent_prompt(request: Request):
         chosen.insert(0, "human")
     db.set_setting("handoff_reasons", ",".join(chosen))
 
-    return RedirectResponse("/agent?ok=" + quote("Настройки агента сохранены"), status_code=303)
+    return RedirectResponse("/agent?ok=" + quote("Настройки агента сохранены") + "#talk",
+                            status_code=303)
 
 
 @app.post("/agent/prompt/template")
@@ -695,17 +732,17 @@ async def agent_prompt_template(request: Request):
     form = await request.form()
     if form.get("restore"):
         db.set_setting("prompt_template", "")
-        return RedirectResponse("/agent?ok=" + quote("Вернул стандартный промпт"),
+        return RedirectResponse("/agent?ok=" + quote("Вернул стандартный промпт") + "#prompt",
                                 status_code=303)
 
     text = str(form.get("prompt_template") or "").strip()
     if len(text) < 40:
         return RedirectResponse(
-            "/agent?error=" + quote("Промпт слишком короткий — агенту не с чем работать"),
+            "/agent?error=" + quote("Промпт слишком короткий — агенту не с чем работать") + "#prompt",
             status_code=303)
     if len(text) > 20000:
         return RedirectResponse(
-            "/agent?error=" + quote("Промпт длиннее 20000 символов"), status_code=303)
+            "/agent?error=" + quote("Промпт длиннее 20000 символов") + "#prompt", status_code=303)
 
     # Владелец правит обычный текст, а храним шаблон с метками: тогда
     # переименование компании или смена тона в полях доходят до промпта, а не
@@ -721,12 +758,12 @@ async def agent_prompt_template(request: Request):
         probe = await llm.check_prompt()
         if probe["ok"]:
             note += f". Проверка прошла: агент ответил «{probe['reply'][:60]}»"
-            return RedirectResponse("/agent?ok=" + quote(note), status_code=303)
+            return RedirectResponse("/agent?ok=" + quote(note) + "#prompt", status_code=303)
         return RedirectResponse(
             "/agent?error=" + quote(note + f". Но проверка не прошла: {probe['detail']}."
-                                    " Кнопка «Вернуть стандартный» рядом"),
+                                    " Кнопка «Вернуть стандартный» рядом") + "#prompt",
             status_code=303)
-    return RedirectResponse("/agent?ok=" + quote(note), status_code=303)
+    return RedirectResponse("/agent?ok=" + quote(note) + "#prompt", status_code=303)
 
 
 # ── автоцепочки ────────────────────────────────────────────────────────
@@ -878,6 +915,23 @@ async def read_site(site: str) -> dict:
         return {"found": 0, "loaded": 0, "error": str(exc)}
 
 
+def _back(form, default: str, **params: str) -> str:
+    """Куда вернуться после сохранения.
+
+    Настройка агента живёт на одной странице с вкладками, и после каждой формы
+    владелец должен оказываться на своей вкладке, а не в начале списка. Адрес
+    берём только внутренний: чужой в поле формы — это открытый редирект.
+    """
+    target = str(form.get("back") or "").strip()
+    if not target.startswith("/") or target.startswith("//"):
+        target = default
+    path, _, fragment = target.partition("#")
+    query = "&".join(f"{key}={quote(value)}" for key, value in params.items() if value)
+    if query:
+        path += ("&" if "?" in path else "?") + query
+    return path + (f"#{fragment}" if fragment else "")
+
+
 @app.post("/settings")
 async def settings_save(request: Request):
     form = await request.form()
@@ -908,9 +962,9 @@ async def settings_save(request: Request):
     new_key = _clean_key(raw_key)
     if raw_key.strip() and not _key_looks_real(new_key):
         return RedirectResponse(
-            "/settings?error=" + quote(
-                "Это не похоже на ключ OpenRouter — он начинается на sk-or-. "
-                "Сохранённый ключ оставлен без изменений."),
+            _back(form, "/settings", error=
+                  "Это не похоже на ключ OpenRouter — он начинается на sk-or-. "
+                  "Сохранённый ключ оставлен без изменений."),
             status_code=303)
     if new_key:
         db.set_setting("openrouter_key", new_key)
@@ -922,7 +976,11 @@ async def settings_save(request: Request):
         if value:
             db.set_setting(field, "".join(value.split()))
 
-    db.set_setting("ai_enabled_global", "1" if form.get("ai_enabled_global") else "0")
+    # Форма с этой галочкой присылает скрытый маркер. Без него отсутствие
+    # галочки означало бы «выключить» — и сохранение соседнего блока на той же
+    # странице гасило бы агента.
+    if form.get("ai_toggle"):
+        db.set_setting("ai_enabled_global", "1" if form.get("ai_enabled_global") else "0")
 
     site = str(form.get("business_site") or "").strip()
     site_note = ""
@@ -933,15 +991,16 @@ async def settings_save(request: Request):
 
     # Новый ключ проверяем сразу: узнать об отказе через неделю по молчащему
     # агенту — худший из возможных вариантов.
-    if new_key or chosen != previous_provider or form.get("yandex_api_key"):
+    provider_changed = bool(chosen) and chosen != previous_provider
+    if new_key or provider_changed or form.get("yandex_api_key"):
         check = await llm.check_key(force=True)
-        return RedirectResponse(
-            "/settings?" + ("ok=" if check["ok"] else "error=") + quote(check["detail"] + site_note),
-            status_code=303)
-    if site_note:
-        return RedirectResponse("/settings?ok=" + quote("Настройки сохранены." + site_note),
+        key = "ok" if check["ok"] else "error"
+        return RedirectResponse(_back(form, "/settings", **{key: check["detail"] + site_note}),
                                 status_code=303)
-    return RedirectResponse("/settings", status_code=303)
+    if site_note:
+        return RedirectResponse(_back(form, "/settings", ok="Настройки сохранены." + site_note),
+                                status_code=303)
+    return RedirectResponse(_back(form, "/settings", ok="Сохранено"), status_code=303)
 
 
 @app.post("/settings/sheets/sync")
@@ -1212,15 +1271,11 @@ async def request_return_ai(request_id: int):
 
 # ── сценарий продаж ────────────────────────────────────────────────────
 
-@app.get("/script", response_class=HTMLResponse)
-async def script_page(request: Request, bot: int | None = None):
-    steps = db.q(
-        "SELECT * FROM script_steps WHERE bot_id IS ? ORDER BY position", (bot,)
-    )
-    return page(request, "script.html", steps=steps, bot_id=bot,
-                sales_bots=db.bots(role="sales", only_enabled=False),
-                templates=db.SCRIPT_TEMPLATES,
-                fields=db.LEAD_FIELDS)
+@app.get("/script")
+async def script_page(bot: int | None = None):
+    """Сценарий тоже стал вкладкой; номер бота переносим, чтобы не терять выбор."""
+    return RedirectResponse(f"/agent?bot={bot}#script" if bot else "/agent#script",
+                            status_code=303)
 
 
 @app.post("/script/save")
@@ -1263,7 +1318,7 @@ async def script_save(request: Request):
              str(form.get("new_field") or "").strip()),
         )
 
-    target = f"/script?bot={bot_id}" if bot_id else "/script"
+    target = f"/agent?bot={bot_id}#script" if bot_id else "/agent#script"
     return RedirectResponse(target, status_code=303)
 
 
@@ -1271,7 +1326,7 @@ async def script_save(request: Request):
 async def script_copy(bot_id: int = Form(...)):
     """Сделать боту свой сценарий — копией общего, дальше правится отдельно."""
     if db.q1("SELECT 1 FROM script_steps WHERE bot_id = ?", (bot_id,)):
-        return RedirectResponse(f"/script?bot={bot_id}", status_code=303)
+        return RedirectResponse(f"/agent?bot={bot_id}#script", status_code=303)
     for step in db.q("SELECT * FROM script_steps WHERE bot_id IS NULL ORDER BY position"):
         db.run(
             "INSERT INTO script_steps (bot_id, position, title, goal, ask_field, enabled)"
@@ -1279,7 +1334,7 @@ async def script_copy(bot_id: int = Form(...)):
             (bot_id, step["position"], step["title"], step["goal"],
              step["ask_field"], step["enabled"]),
         )
-    return RedirectResponse(f"/script?bot={bot_id}", status_code=303)
+    return RedirectResponse(f"/agent?bot={bot_id}#script", status_code=303)
 
 
 # ── мастер запуска ─────────────────────────────────────────────────────
@@ -1298,7 +1353,7 @@ async def script_template(request: Request, template: str = Form(...),
                           bot_id: str = Form("")):
     target = int(bot_id) if bot_id else None
     db.apply_template(template, target)
-    return RedirectResponse(f"/script?bot={bot_id}" if bot_id else "/script",
+    return RedirectResponse(f"/agent?bot={bot_id}#script" if bot_id else "/agent#script",
                             status_code=303)
 
 
@@ -1314,7 +1369,7 @@ async def script_reorder(request: Request):
 @app.post("/script/step/{step_id}/delete")
 async def script_step_delete(step_id: int, bot_id: str = Form("")):
     db.run("DELETE FROM script_steps WHERE id = ?", (step_id,))
-    return RedirectResponse(f"/script?bot={bot_id}" if bot_id else "/script",
+    return RedirectResponse(f"/agent?bot={bot_id}#script" if bot_id else "/agent#script",
                             status_code=303)
 
 

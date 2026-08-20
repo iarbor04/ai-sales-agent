@@ -1,9 +1,28 @@
 {% extends "base.html" %}
-{% block title %}Агент · ИИ-продажник{% endblock %}
+{% block title %}ИИ-продажник · настройка{% endblock %}
 {% block body %}
 
-{# Первый экран отвечает на единственный вопрос новичка: работает или нет,
-   и что нажать прямо сейчас. Всё остальное — ниже и свёрнуто. #}
+{# Вся настройка продажника — одной страницей. Раньше владелец ходил по пяти
+   разделам (боты, база знаний, сценарий, настройки, промпт) и терял нитку:
+   что уже сделано, а что нет. Здесь сверху ответ «работает или нет», ниже
+   вкладки — и на каждой видно, закрыт шаг или ещё нет. #}
+
+{# Галочка означает «этот шаг закрыт». У вкладок, которые закрывать не нужно
+   (разговор настроен по умолчанию, промпт собирается сам), метка нейтральная —
+   иначе зелёная галочка обещает то, чего владелец не делал. #}
+{% set tabs = [
+  {'id': 'model',   'title': 'Модель',      'sub': 'чем думает',      'need': true,
+   'done': key_ready},
+  {'id': 'kb',      'title': 'База знаний', 'sub': 'что знает',       'need': true,
+   'done': kb.loaded > 0},
+  {'id': 'talk',    'title': 'Разговор',    'sub': 'как отвечает',    'need': false},
+  {'id': 'script',  'title': 'Сценарий',    'sub': 'к чему ведёт',    'need': false,
+   'done': script_steps | length > 0},
+  {'id': 'handoff', 'title': 'Передача',    'sub': 'когда зовёт вас', 'need': true,
+   'done': operator_chat.strip() and handoff_note.strip()},
+  {'id': 'prompt',  'title': 'Промпт',      'sub': 'текст целиком',   'need': false}
+] %}
+
 <section class="hero {{ 'live' if checklist.ready else 'setup' }}">
   <div class="hero-main">
     <span class="hero-eyebrow">{{ business or 'Ваш бизнес' }}</span>
@@ -14,10 +33,11 @@
     <p>
       {% if checklist.ready %}
         Он разговаривает с людьми в мессенджерах, собирает заявки и зовёт вас,
-        когда нужен человек.
+        когда нужен человек. Всё, что можно поменять, — во вкладках ниже.
       {% else %}
         Осталось {{ checklist.total - checklist.done }} из {{ checklist.total }}:
         без этого он будет молчать и передавать каждый разговор менеджеру.
+        Вкладки ниже — по порядку, сверху вниз.
       {% endif %}
     </p>
     {% if checklist.next %}
@@ -37,84 +57,194 @@
   </div>
 </section>
 
-<h2 class="section-title">Что нужно агенту для работы</h2>
-<div class="steps">
-  {% for step in checklist.steps %}
-  <article class="step-row {{ 'done' if step.done }}">
-    <div class="step-mark">{{ '✓' if step.done else loop.index }}</div>
-    <div class="step-text">
-      <b>{{ step.title }}{% if step.optional %} <span class="hint">по желанию</span>{% endif %}</b>
-      <p>{{ step.why }}</p>
-      {% if not step.done %}<p class="step-how">{{ step.how }}</p>{% endif %}
-    </div>
-    <div class="step-state">
-      <span class="pill {{ 'ok' if step.done else 'warn' }}">{{ step.state }}</span>
-      <a class="btn ghost small" href="{{ step.link }}">{{ 'Изменить' if step.done else step.action }}</a>
-    </div>
-  </article>
+<nav class="wiz" id="wiz">
+  {% for tab in tabs %}
+  <a href="#{{ tab.id }}" data-tab="{{ tab.id }}" class="wz">
+    <span class="wz-mark {{ 'done' if tab.done }} {{ 'need' if tab.need and not tab.done }}">{{
+      '✓' if tab.done else (loop.index if tab.need else '·') }}</span>
+    <span class="wz-text">
+      <b>{{ tab.title }}</b>
+      <span>{{ tab.sub }}</span>
+    </span>
+  </a>
   {% endfor %}
-</div>
+</nav>
 
-<h2 class="section-title">Как он разговаривает</h2>
-<div class="card">
-  <p class="lead-text">Заполните обычными словами — промпт соберётся сам.</p>
-  <form method="post" action="/agent/prompt">
-    <div class="row">
-      <div class="field">
-        <label>Кто он для клиента</label>
-        <input type="text" name="agent_role" value="{{ agent_role }}"
-               placeholder="продавец-консультант" maxlength="120">
-        <span class="note">Например: консультант по головным уборам.</span>
+{# ── 1. Модель ─────────────────────────────────────────────────────── #}
+<section class="panel" id="panel-model">
+  <div class="panel-head">
+    <h2>Чем агент думает</h2>
+    <p>Без ключа модели агент не может ответить ни на один вопрос — он просто
+      передаёт каждый разговор менеджеру. Ключ берётся у провайдера за минуту.</p>
+  </div>
+  <div class="card">{% include "parts/model.html" %}</div>
+</section>
+
+{# ── 2. База знаний ────────────────────────────────────────────────── #}
+<section class="panel" id="panel-kb">
+  <div class="panel-head">
+    <h2>Что агент знает</h2>
+    <p>Отсюда он берёт ответы. Чего здесь нет — не скажет, а позовёт менеджера:
+      выдумывать цены и сроки ему запрещено.</p>
+  </div>
+  {% include "parts/kb.html" %}
+</section>
+
+{# ── 3. Разговор ───────────────────────────────────────────────────── #}
+<section class="panel" id="panel-talk">
+  <div class="panel-head">
+    <h2>Как агент разговаривает</h2>
+    <p>Заполните обычными словами — промпт соберётся сам. Всё, что здесь
+      написано, попадёт в него дословно.</p>
+  </div>
+  <div class="card">
+    <form method="post" action="/agent/prompt">
+      <div class="row">
+        <div class="field">
+          <label>Кто он для клиента</label>
+          <input type="text" name="agent_role" value="{{ agent_role }}"
+                 placeholder="продавец-консультант" maxlength="120">
+          <span class="note">Например: консультант по головным уборам.</span>
+        </div>
+        <div class="field">
+          <label>Как разговаривает</label>
+          <input type="text" name="tone" value="{{ tone }}" list="tone-presets"
+                 placeholder="дружелюбно, коротко, по делу" maxlength="120">
+          <datalist id="tone-presets">
+            {% for preset in tone_presets %}<option value="{{ preset }}"></option>{% endfor %}
+          </datalist>
+        </div>
+        <div class="field">
+          <label>Длина ответа</label>
+          <select name="reply_length">
+            {% for key, text in lengths.items() %}
+            <option value="{{ key }}" {{ 'selected' if reply_length == key }}>{{ text }}</option>
+            {% endfor %}
+          </select>
+        </div>
       </div>
+
       <div class="field">
-        <label>Как разговаривает</label>
-        <input type="text" name="tone" value="{{ tone }}" list="tone-presets"
-               placeholder="дружелюбно, коротко, по делу" maxlength="120">
-        <datalist id="tone-presets">
-          {% for preset in tone_presets %}<option value="{{ preset }}"></option>{% endfor %}
-        </datalist>
-      </div>
-      <div class="field">
-        <label>Длина ответа</label>
-        <select name="reply_length">
-          {% for key, text in lengths.items() %}
-          <option value="{{ key }}" {{ 'selected' if reply_length == key }}>{{ text }}</option>
+        <label>Когда звать живого менеджера</label>
+        <div class="checks">
+          {% for key, text in handoff_reasons.items() %}
+          <label class="check">
+            <input type="checkbox" name="handoff_{{ key }}" {{ 'checked' if key in handoff_on }}
+                   {{ 'disabled checked' if key == 'human' }}>
+            <span>{{ text }}{% if key == 'human' %} <span class="hint">всегда</span>{% endif %}</span>
+          </label>
           {% endfor %}
-        </select>
+        </div>
+        {% if not handoff_note.strip() %}
+        <span class="note" style="color:var(--danger)">
+          Сейчас в момент передачи клиент не получит ничего — разговор для него
+          просто оборвётся. Фраза вписывается на вкладке
+          <a href="#handoff" data-goto="handoff">«Передача»</a>.
+        </span>
+        {% endif %}
       </div>
-    </div>
 
-    <div class="field">
-      <label>Когда звать живого менеджера</label>
-      <div class="checks">
-        {% for key, text in handoff_reasons.items() %}
-        <label class="check">
-          <input type="checkbox" name="handoff_{{ key }}" {{ 'checked' if key in handoff_on }}
-                 {{ 'disabled checked' if key == 'human' }}>
-          <span>{{ text }}{% if key == 'human' %} <span class="hint">всегда</span>{% endif %}</span>
-        </label>
+      <div class="field">
+        <label>Что важно именно в вашем деле</label>
+        <textarea name="prompt_extra" style="min-height:100px"
+          placeholder="Скидки не обещаем — их согласовывает менеджер.&#10;Всегда предлагаем доставку и называем срок.">{{ prompt_extra }}</textarea>
+        <span class="note">По одному правилу в строке. Самое важное пишите первым:
+          это указания для ИИ, он их учитывает, но не выполняет как программу.</span>
+      </div>
+
+      <button class="btn" type="submit">Сохранить</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2>Как он представляется</h2>
+    <form method="post" action="/settings">
+      <input type="hidden" name="back" value="/agent#talk">
+      <div class="row">
+        <div class="field">
+          <label>Название компании</label>
+          <input type="text" name="business_name" value="{{ business }}">
+          <span class="note">Агент называет его клиенту и подставляет в промпт.</span>
+        </div>
+      </div>
+      <div class="field">
+        <label>Первое сообщение на /start</label>
+        <textarea name="greeting" style="min-height:70px">{{ greeting }}</textarea>
+        <span class="note">Пусто — агент поздоровается сам, своими словами.</span>
+      </div>
+      <button class="btn" type="submit">Сохранить</button>
+    </form>
+  </div>
+</section>
+
+{# ── 4. Сценарий ───────────────────────────────────────────────────── #}
+<section class="panel" id="panel-script">
+  <div class="panel-head">
+    <h2>К чему агент ведёт разговор</h2>
+    <p>Шаги — не анкета: агент получает цель шага и сам решает, как её достичь.
+      По желанию — без сценария он тоже отвечает и собирает заявки.</p>
+  </div>
+  {% include "parts/script.html" %}
+</section>
+
+{# ── 5. Передача менеджеру ─────────────────────────────────────────── #}
+<section class="panel" id="panel-handoff">
+  <div class="panel-head">
+    <h2>Когда агент зовёт вас</h2>
+    <p>Момент передачи — самое узкое место: если фраза не задана, клиент видит
+      обрыв разговора, а если не указан чат, о нём никто не узнает.</p>
+  </div>
+  <div class="card">{% include "parts/notify.html" %}</div>
+</section>
+
+{# ── 6. Промпт ─────────────────────────────────────────────────────── #}
+<section class="panel" id="panel-prompt">
+  <div class="panel-head">
+    <h2>Промпт</h2>
+    <p>Это весь текст, который агент получает перед каждым ответом. Правьте как
+      обычное письмо: что оставите как есть — будет и дальше подтягиваться из
+      полей выше, а переписанное останется вашими словами.</p>
+  </div>
+  <div class="card">
+    {% if prompt_is_custom %}
+    <div class="callout">Промпт переписан вами. Кнопка «Вернуть стандартный» ниже
+      возвращает исходный текст.</div>
+    {% endif %}
+
+    <form method="post" action="/agent/prompt/template">
+      <div class="prompt-tools">
+        <span class="prompt-tools-label">Готовые сценарии — вставить в текст:</span>
+        {% for item in templates_list %}
+        <button type="button" class="chip" data-snippet="{{ item.prompt }}"
+                title="{{ item.steps | join(' → ') }}">{{ item.title }}</button>
         {% endfor %}
       </div>
-      {% if not handoff_note.strip() %}
-      <span class="note" style="color:var(--danger)">
-        Сейчас в момент передачи клиент не получит ничего — разговор для него
-        просто оборвётся. Впишите фразу в
-        <a href="/settings">Настройках</a>, например «Передаю вас менеджеру, он ответит здесь же».
-      </span>
-      {% endif %}
-    </div>
 
-    <div class="field">
-      <label>Что важно именно в вашем деле</label>
-      <textarea name="prompt_extra" style="min-height:100px"
-        placeholder="Скидки не обещаем — их согласовывает менеджер.&#10;Всегда предлагаем доставку и называем срок.">{{ prompt_extra }}</textarea>
-      <span class="note">По одному правилу в строке. Самое важное пишите первым:
-        это указания для ИИ, он их учитывает, но не выполняет как программу.</span>
-    </div>
+      <textarea name="prompt_template" id="prompt-template" spellcheck="false">{{ prompt_template }}</textarea>
 
-    <button class="btn" type="submit">Сохранить</button>
-  </form>
+      <p class="note">
+        Служебную часть про формат ответа дописываю сам, помнить о ней не нужно.
+        После сохранения сразу проверю живым запросом.
+      </p>
+
+      <div class="row between">
+        <button class="btn ghost small" type="submit" name="restore" value="1"
+                onclick="return confirm('Вернуть стандартный текст? Ваши правки пропадут.')">
+          Вернуть стандартный</button>
+        <button class="btn" type="submit">Сохранить и проверить</button>
+      </div>
+    </form>
+  </div>
+</section>
+
+{% if health.problems %}
+<div class="card warn">
+  <h2>Проверка нашла проблемы</h2>
+  <ul class="small" style="margin:0;padding-left:18px">
+    {% for problem in health.problems %}<li>{{ problem }}</li>{% endfor %}
+  </ul>
 </div>
+{% endif %}
 
 {% if sales_bots %}
 <h2 class="section-title">Кто разговаривает с клиентами</h2>
@@ -136,79 +266,106 @@
 </div>
 {% endif %}
 
-<h2 class="section-title">Промпт</h2>
-<div class="card">
-  <details class="prompt-editor" {{ 'open' if prompt_is_custom }}>
-    <summary class="btn ghost small">
-      {{ 'Промпт изменён вручную — открыть' if prompt_is_custom
-         else 'Показать промпт' }}
-    </summary>
-
-    <p class="lead-text" style="margin-top:14px">
-      Это и есть промпт — весь текст, который агент получает перед каждым
-      ответом. Правьте его как обычное письмо: что оставите как есть — будет и
-      дальше подтягиваться из полей, а переписанное останется вашими словами.
-    </p>
-
-    {% if prompt_is_custom %}
-    <div class="callout">Промпт переписан вами. Кнопка «Вернуть стандартный» ниже
-      возвращает исходный текст.</div>
-    {% endif %}
-
-    <form method="post" action="/agent/prompt/template">
-      <div class="prompt-tools">
-        <span class="prompt-tools-label">Готовые сценарии — вставить в текст:</span>
-        {% for item in templates_list %}
-        <button type="button" class="chip" data-snippet="{{ item.prompt }}"
-                title="{{ item.steps | join(' → ') }}">{{ item.title }}</button>
-        {% endfor %}
-      </div>
-
-      <textarea name="prompt_template" id="prompt-template" spellcheck="false">{{ prompt_template }}</textarea>
-
-      <p class="note">
-        Обычный текст: название компании, тон и остальное из полей выше уже
-        подставлены. Что не тронете — продолжит обновляться из полей само.
-        Служебную часть про формат ответа дописываю сам, помнить о ней не нужно.
-        После сохранения сразу проверю живым запросом.
-      </p>
-
-      <div class="row between">
-        <button class="btn ghost small" type="submit" name="restore" value="1"
-                onclick="return confirm('Вернуть стандартный текст? Ваши правки пропадут.')">
-          Вернуть стандартный</button>
-        <button class="btn" type="submit">Сохранить и проверить</button>
-      </div>
-    </form>
-
-  </details>
-</div>
-
-{% if health.problems %}
-<div class="card warn">
-  <h2>Проверка нашла проблемы</h2>
-  <ul class="small" style="margin:0;padding-left:18px">
-    {% for problem in health.problems %}<li>{{ problem }}</li>{% endfor %}
-  </ul>
-</div>
-{% endif %}
-
 <script>
+// Вкладки: без JS видны все панели подряд — страница остаётся рабочей.
+(() => {
+  const tabs = [...document.querySelectorAll('#wiz .wz')];
+  const panels = new Map(tabs.map(t => [t.dataset.tab,
+                                        document.getElementById('panel-' + t.dataset.tab)]));
+  const first = tabs.find(t => !t.querySelector('.wz-mark').classList.contains('done'));
+
+  function show(id, push) {
+    if (!panels.has(id)) return;
+    panels.forEach((panel, key) => panel.hidden = key !== id);
+    tabs.forEach(tab => tab.classList.toggle('on', tab.dataset.tab === id));
+    if (push) history.replaceState(null, '', '#' + id);
+    document.querySelectorAll('#wiz .wz.on')[0]
+      ?.scrollIntoView({block: 'nearest', inline: 'nearest'});
+  }
+
+  tabs.forEach(tab => tab.addEventListener('click', event => {
+    event.preventDefault();
+    show(tab.dataset.tab, true);
+  }));
+
+  // ссылки вида «вписывается на вкладке Передача» переключают, а не прокручивают
+  document.querySelectorAll('[data-goto]').forEach(link =>
+    link.addEventListener('click', event => {
+      event.preventDefault();
+      show(link.dataset.goto, true);
+    }));
+
+  show(location.hash.slice(1) || (first ? first.dataset.tab : 'model'), false);
+})();
+
+// Кнопки готовых сценариев вставляют текст в промпт по месту курсора.
 (() => {
   const area = document.getElementById('prompt-template');
   if (!area) return;
   document.querySelectorAll('.chip[data-snippet]').forEach(chip => {
     chip.addEventListener('click', () => {
-      const snippet = chip.dataset.snippet;
-      const start = area.selectionStart ?? area.value.length;
-      const end = area.selectionEnd ?? area.value.length;
-      const block = snippet.startsWith('{') ? snippet : `\n\n${snippet}\n`;
-      area.setRangeText(block, start, end, 'end');
+      const text = chip.dataset.snippet;
+      const at = area.selectionStart ?? area.value.length;
+      const before = area.value.slice(0, at).replace(/\s*$/, '');
+      const after = area.value.slice(at);
+      area.value = before + (before ? '\n\n' : '') + text + (after ? '\n\n' : '') + after.replace(/^\s*/, '');
       area.focus();
-      chip.classList.add('used');
-      setTimeout(() => chip.classList.remove('used'), 700);
+      area.selectionStart = area.selectionEnd = before.length + text.length + (before ? 2 : 0);
     });
   });
 })();
+
+// Провайдер модели: переключение панелей доступа без перезагрузки.
+(() => {
+  const hidden = document.getElementById('model-provider');
+  if (!hidden) return;
+  document.querySelectorAll('.provider-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      hidden.value = tab.dataset.provider;
+      document.querySelectorAll('.provider-tab').forEach(t => t.classList.toggle('on', t === tab));
+      document.querySelectorAll('.provider-pane').forEach(pane =>
+        pane.hidden = pane.dataset.provider !== tab.dataset.provider);
+    });
+  });
+})();
+
+// Проверка ключа и модели одной кнопкой: список моделей отдаётся и без ключа,
+// поэтому «модели загрузились» само по себе ничего не доказывает.
+async function checkAi() {
+  const out = document.getElementById('aiout');
+  out.style.color = '';
+  out.textContent = 'проверяю…';
+  try {
+    const resp = await fetch('/settings/ai/check');
+    const data = await resp.json();
+    out.textContent = 'Ключ: ' + data.key.detail + '. Модель: ' + data.model.detail;
+    if (!data.key.ok || !data.model.ok) out.style.color = 'var(--danger)';
+  } catch (err) {
+    out.style.color = 'var(--danger)';
+    out.textContent = 'Проверка не выполнена: ' + err;
+  }
+}
+
+// Список моделей у провайдера длинный, но грузим целиком: владельцу нужен
+// выбор, а не наш короткий список «рекомендованного».
+async function loadModels() {
+  const select = document.getElementById('mselect');
+  if (!select || select.options.length > 1) return;
+  const rows = await (await fetch('/api/models')).json();
+  if (!rows.length) return;
+  const chosen = select.value;
+  select.innerHTML = '';
+  rows.forEach(row => {
+    const opt = document.createElement('option');
+    opt.value = row.id;
+    opt.textContent = row.id;
+    if (row.id === chosen) opt.selected = true;
+    select.appendChild(opt);
+  });
+  document.getElementById('mcount').innerHTML =
+    'Доступно моделей: <b>' + rows.length + '</b>. ' +
+    'Дешевле и быстрее — модели с пометкой mini или flash.';
+}
+loadModels();
 </script>
 {% endblock %}

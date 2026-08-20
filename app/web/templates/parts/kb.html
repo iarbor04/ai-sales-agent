@@ -1,19 +1,8 @@
-{% extends "base.html" %}
-{% block title %}База знаний · ИИ-продажник{% endblock %}
-{% block body %}
-<div class="topbar">
-  <div style="flex:1">
-    <h1>База знаний</h1>
-    <p class="sub">Отсюда агент берёт ответы. Чего здесь нет — он не скажет,
-      а позовёт менеджера.</p>
-  </div>
-</div>
-
 <div class="grid c4">
-  <div class="stat"><div class="n">{{ stats.loaded }}</div><div class="l">источников загружено</div></div>
-  <div class="stat"><div class="n">{{ stats.chunks }}</div><div class="l">фрагментов для поиска</div></div>
-  <div class="stat"><div class="n">{{ stats.total }}</div><div class="l">страниц найдено</div></div>
-  <div class="stat"><div class="n">{{ stats.included }}</div><div class="l">включено</div></div>
+  <div class="stat"><div class="n">{{ kb.loaded }}</div><div class="l">источников загружено</div></div>
+  <div class="stat"><div class="n">{{ kb.chunks }}</div><div class="l">фрагментов для поиска</div></div>
+  <div class="stat"><div class="n">{{ kb.total }}</div><div class="l">страниц найдено</div></div>
+  <div class="stat"><div class="n">{{ kb.included }}</div><div class="l">включено</div></div>
 </div>
 
 <div class="card">
@@ -24,6 +13,7 @@
     Ни ключей, ни публикации: файл никуда не уходит с вашего сервера.
   </p>
   <form method="post" action="/knowledge/file" enctype="multipart/form-data" class="row">
+  <input type="hidden" name="back" value="/agent#kb">
     <div class="field">
       <label>Прайс, условия, регламент, договор</label>
       <input type="file" name="file" accept=".xlsx,.csv,.tsv,.docx,.txt,.md">
@@ -37,17 +27,18 @@
     <button class="btn" type="submit">Загрузить</button>
   </form>
 
-  {% if files %}
+  {% if kb_files %}
   <table style="margin-top:8px">
     <tr><th>Файл</th><th style="width:100px">Символов</th>
         <th style="width:130px">Загружен</th><th style="width:110px"></th></tr>
-    {% for f in files %}
+    {% for f in kb_files %}
     <tr>
       <td>{{ f.title or f.url }}</td>
       <td>{{ f.chars or '—' }}</td>
       <td class="small dim">{{ f.fetched_at | dt or '—' }}</td>
       <td class="right">
         <form method="post" action="/knowledge/file/{{ f.id }}/delete">
+  <input type="hidden" name="back" value="/agent#kb">
           <button class="btn ghost small danger" type="submit">Убрать</button>
         </form>
       </td>
@@ -65,35 +56,40 @@
   <h2>Сайт компании</h2>
   <p class="lead-text">
     Подходит для описательного: о компании, услуги, доставка, гарантии.
-    Обходим только внутренние страницы этого домена; недоступные пропускаем.
+    Сохраните адрес — агент сам обойдёт страницы этого домена и прочитает их,
+    это занимает минуту-другую. Ниже появится список: лишнее (блог, новости)
+    снимите галочкой. Недоступные страницы пропускаем.
   </p>
   <form method="post" action="/knowledge/discover" class="row">
+  <input type="hidden" name="back" value="/agent#kb">
     <div class="field">
       <label>Домен</label>
-      <input type="text" name="site" value="{{ site }}" placeholder="example.com">
+      <input type="text" name="site" value="{{ kb_site }}" placeholder="example.com">
     </div>
-    <button class="btn ghost" type="submit">Найти страницы</button>
+    <button class="btn" type="submit">Прочитать сайт</button>
   </form>
 </div>
 
-{% if pages %}
+{% if kb_pages %}
 <div class="card">
   <h2>Страницы сайта <span class="hint">снимите галочку с лишних и сохраните</span></h2>
   <div class="row between" style="margin-bottom:12px">
     <span class="dim small">
-      {% if last_refresh %}Последняя проверка: {{ last_refresh | dt }}.{% endif %}
+      {% if kb_last_refresh %}Последняя проверка: {{ kb_last_refresh | dt }}.{% endif %}
       Агент перечитывает сайт сам — цены там меняются без нас.
     </span>
     <form method="post" action="/knowledge/refresh">
+  <input type="hidden" name="back" value="/agent#kb">
       <button class="btn ghost small">Перечитать сейчас</button>
     </form>
   </div>
   <form method="post" action="/knowledge/select">
+  <input type="hidden" name="back" value="/agent#kb">
     <table>
       <tr><th style="width:44px"></th><th>Страница</th>
           <th style="width:100px">Символов</th><th style="width:130px">Проверена</th>
           <th style="width:130px">Статус</th></tr>
-      {% for p in pages %}
+      {% for p in kb_pages %}
       <tr>
         <td><input type="checkbox" name="page_{{ p.id }}" {{ 'checked' if p.included }}></td>
         <td>
@@ -118,9 +114,10 @@
 
   <form method="post" action="/knowledge/schedule" class="row"
         style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border-soft)">
+  <input type="hidden" name="back" value="/agent#kb">
     <div class="field" style="max-width:220px">
       <label>Перечитывать сайт каждые, часов</label>
-      <input type="number" name="hours" value="{{ refresh_hours }}" min="0" max="720">
+      <input type="number" name="hours" value="{{ kb_refresh_hours }}" min="0" max="720">
       <span class="note">Ноль — не перечитывать. Страница, которая перестала
         открываться, выпадает из поиска, и владелец получает уведомление.</span>
     </div>
@@ -136,9 +133,10 @@
     что отвечать на возражения.
   </p>
   <form method="post" action="/knowledge/extra">
+  <input type="hidden" name="back" value="/agent#kb">
     <div class="field">
       <textarea name="text" style="min-height:170px"
-        placeholder="Доставка по городу — 500 ₽, 1–2 дня.&#10;Рассрочка на 6 месяцев без процентов.&#10;Гарантия на каркас — 18 месяцев.">{{ extra }}</textarea>
+        placeholder="Доставка по городу — 500 ₽, 1–2 дня.&#10;Рассрочка на 6 месяцев без процентов.&#10;Гарантия на каркас — 18 месяцев.">{{ kb_extra }}</textarea>
     </div>
     <button class="btn ghost" type="submit">Сохранить</button>
   </form>
@@ -178,4 +176,3 @@ async function testKb() {
       + 'Загрузите прайс файлом или впишите главное руками.';
 }
 </script>
-{% endblock %}

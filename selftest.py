@@ -109,19 +109,34 @@ def main() -> int:
           and "Агент ещё не отвечает клиентам" in agent_html)
     check("на первом экране один следующий шаг",
           "Дальше: {{ checklist.next.title | lower }}" in agent_html)
-    check("страница показывает чек-лист готовности",
-          "Что нужно агенту для работы" in agent_html and "checklist.steps" in agent_html)
-    check("у невыполненного шага видно, что делать",
-          "step.how" in agent_html and "step.action" in agent_html)
+    # Вся настройка агента — одной страницей с вкладками: модель, база знаний,
+    # разговор, сценарий, передача, промпт. Отдельно остались только каналы.
+    tab_ids = ["model", "kb", "talk", "script", "handoff", "prompt"]
+    check("на странице все шесть вкладок настройки",
+          all(f"'id': '{tab}'" in agent_html for tab in tab_ids)
+          and all(f'id="panel-{tab}"' in agent_html for tab in tab_ids))
+    check("у вкладки видно, закрыт шаг или нет",
+          "wz-mark" in agent_html and "'done':" in agent_html)
+    check("галочка стоит только там, где шаг правда закрывают",
+          "'need': true" in agent_html and "'need': false" in agent_html
+          and "if tab.need else" in agent_html)
+    check("у каждой вкладки есть объяснение своими словами",
+          agent_html.count('class="panel-head"') == len(tab_ids))
+    check("база знаний и сценарий встроены, а не ссылками",
+          'include "parts/kb.html"' in agent_html
+          and 'include "parts/script.html"' in agent_html
+          and 'include "parts/model.html"' in agent_html)
+    check("без JS видны все панели, страница не ломается",
+          "panel.hidden = key !== id" in agent_html
+          and 'class="panel"' in agent_html and "hidden" not in
+          agent_html.split('<section class="panel" id="panel-model">')[1][:80])
     check("страница предупреждает про пустую фразу передачи",
           "разговор для него" in agent_html and "просто оборвётся" in agent_html)
-    check("промпт спрятан под раскрытие и назван промптом",
-          '<h2 class="section-title">Промпт</h2>' in agent_html
-          and "Показать промпт" in agent_html
-          and "нструкци" not in agent_html)
+    check("промпт назван промптом, а не инструкцией",
+          "'title': 'Промпт'" in agent_html and "нструкци" not in agent_html)
     check("новичок настраивает агента полями, а не текстом промпта",
-          agent_html.index("Как он разговаривает")
-          < agent_html.index('<h2 class="section-title">Промпт</h2>')
+          agent_html.index("Как агент разговаривает")
+          < agent_html.index('id="panel-prompt"')
           and "Когда звать живого менеджера" in agent_html)
     check("шаблоны сценариев вставляются кнопками",
           'class="chip" data-snippet' in agent_html and "Готовые сценарии" in agent_html)
@@ -142,6 +157,20 @@ def main() -> int:
     check("шаблонов удалённых страниц не осталось",
           not (ROOT / "app/web/templates/setup.html").exists()
           and not (ROOT / "app/web/templates/channels.html").exists())
+
+    # Формы на одной странице частичные: каждая присылает только свои поля.
+    # Общий обработчик настроек не должен из-за этого гасить агента, стирать
+    # соседние поля или объявлять, что провайдер сменился.
+    main_src_agent = (ROOT / "app/web/main.py").read_text(encoding="utf-8")
+    check("пустая галочка ИИ не выключает агента из чужой формы",
+          'if form.get("ai_toggle"):' in main_src_agent)
+    check("пустое поле провайдера не считается сменой провайдера",
+          "provider_changed = bool(chosen) and chosen != previous_provider" in main_src_agent)
+    check("после сохранения владелец остаётся на своей вкладке",
+          'name="back" value="/agent#model"' in
+          (ROOT / "app/web/templates/parts/model.html").read_text(encoding="utf-8")
+          and 'name="back" value="/agent#handoff"' in
+          (ROOT / "app/web/templates/parts/notify.html").read_text(encoding="utf-8"))
 
     check("шаблон превращается в текст для промпта",
           "Веди разговор по шагам" in db.template_prompt("shop")
@@ -492,7 +521,15 @@ def main() -> int:
 
     asyncio.run(site_reading())
     check("под полем сайта написано, что будет дальше",
-          "обойдёт страницы" in (ROOT / "app/web/templates/settings.html").read_text(encoding="utf-8"))
+          "обойдёт страницы этого домена и прочитает их"
+          in (ROOT / "app/web/templates/parts/kb.html").read_text(encoding="utf-8"))
+    # Поле сайта осталось одно (в базе знаний) и запускает полное чтение:
+    # раньше «найти страницы» и «прочитать сайт» были разными кнопками в
+    # разных разделах, и владелец ждал текстов от той, что их не грузит.
+    main_src = (ROOT / "app/web/main.py").read_text(encoding="utf-8")
+    check("сохранение сайта запускает чтение страниц",
+          "_load_pending()" in main_src
+          and main_src.count("async def _load_pending") == 1)
 
     section("Нет мёртвого кода")
     tables_now = {r["name"] for r in db.q(

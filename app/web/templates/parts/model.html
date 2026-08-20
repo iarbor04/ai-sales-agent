@@ -1,0 +1,72 @@
+{# Чем агент думает: провайдер, доступ, модель. Форма частичная — общий
+   обработчик настроек пишет только то, что пришло, поэтому соседние блоки
+   этой страницы не затрагиваются. #}
+<form method="post" action="/settings">
+  <input type="hidden" name="back" value="/agent#model">
+  <input type="hidden" name="ai_toggle" value="1">
+
+  <div class="field">
+    <label>Кто отвечает клиентам</label>
+    <div class="lang-tabs">
+      {% for item in providers_list %}
+      <button type="button" class="lang-tab provider-tab {{ 'on' if provider == item.name }}"
+              data-provider="{{ item.name }}">
+        {{ item.title }}{% if item.configured %}<i class="filled"></i>{% endif %}
+      </button>
+      {% endfor %}
+    </div>
+    <input type="hidden" name="model_provider" id="model-provider" value="{{ provider }}">
+  </div>
+
+  {% for item in providers_list %}
+  <div class="provider-pane" data-provider="{{ item.name }}"
+       {{ '' if provider == item.name else 'hidden' }}>
+    <p class="note">{{ item.help }}</p>
+    {% for field in item.fields %}
+    <div class="field">
+      <label>{{ field.label }}</label>
+      <input type="{{ 'password' if field.secret else 'text' }}" name="{{ field.key }}"
+             autocomplete="off" data-lpignore="true"
+             placeholder="{% if field.secret and key_ready %}сохранён — впишите новый, чтобы заменить{% else %}{{ field.hint }}{% endif %}">
+    </div>
+    {% endfor %}
+    {% if item.name == 'openrouter' and key_ready and provider == 'openrouter' %}
+    <label class="check"><input type="checkbox" name="drop_key">
+      <span>удалить сохранённый ключ</span></label>
+    {% endif %}
+  </div>
+  {% endfor %}
+
+  {% if key_ready %}<p class="note">Доступ к {{ provider_title }}: {{ key_source }}.</p>{% endif %}
+
+  <div class="field">
+    <label>Модель для ответов</label>
+    <select name="model" id="mselect">
+      {% for m in models %}
+      <option value="{{ m.id }}" {{ 'selected' if model == m.id }}>{{ m.id }}</option>
+      {% else %}
+      <option value="{{ model }}" selected>{{ model }}</option>
+      {% endfor %}
+    </select>
+    <span class="note" id="mcount">
+      {% if models %}Доступно моделей: {{ models | length }}.
+      {% else %}Список подгрузится, как только сохраните ключ.{% endif %}
+      Дешевле и быстрее — модели с пометкой mini или flash.
+    </span>
+  </div>
+
+  <label class="check">
+    <input type="checkbox" name="ai_enabled_global" {{ 'checked' if ai_on }}>
+    <span>ИИ отвечает клиентам</span>
+  </label>
+  <p class="muted small">Снятая галочка — общий стоп: все новые диалоги идут сразу менеджеру.</p>
+
+  <div class="row between" style="margin-top:14px">
+    <button class="btn ghost small" type="button" onclick="checkAi()">Проверить ключ и модель</button>
+    <button class="btn" type="submit">Сохранить</button>
+  </div>
+  <p class="note" id="aiout">
+    {% if key_check %}Ключ: {{ key_check.detail }}.{% endif %}
+    Проверка отправляет один короткий запрос выбранной моделью — то же, что делает агент.
+  </p>
+</form>
