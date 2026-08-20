@@ -554,9 +554,12 @@ def main() -> int:
         check(f"README рассказывает про «{feature}»", feature in readme)
     check("README не обещает PDF", "PDF в базу знаний не грузится" in readme)
 
-    check("сторонних зависимостей ровно восемь",
-          len([line for line in (ROOT / "requirements.txt").read_text(encoding="utf-8").splitlines()
-               if line.strip()]) == 8)
+    # Список закреплён числом намеренно: каждая новая зависимость — это ещё
+    # одна причина, по которой установка у клиента не соберётся.
+    deps = [line.split("==")[0].split("[")[0] for line in
+            (ROOT / "requirements.txt").read_text(encoding="utf-8").splitlines() if line.strip()]
+    check("сторонних зависимостей ровно девять", len(deps) == 9, ", ".join(deps))
+    check("подпись подписки проверяется библиотекой из списка", "rsa" in deps)
 
     section("Сайт из настроек")
 
@@ -820,7 +823,8 @@ def main() -> int:
         from app import llm, providers
         from app.providers import yandex
 
-        check("провайдеров двое", {p.NAME for p in providers.ALL} == {"openrouter", "yandex"})
+        check("провайдеров трое: шлюз ASCN, OpenRouter, YandexGPT",
+              {p.NAME for p in providers.ALL} == {"ascn", "openrouter", "yandex"})
         check("неизвестное имя не роняет панель", providers.get("что-то").NAME == "openrouter")
 
         # ── YandexGPT: свой формат запроса и ответа ──
@@ -891,9 +895,13 @@ def main() -> int:
         check("настройки GigaChat не остаются мусором в базе",
               not db.q("SELECT 1 FROM settings WHERE key LIKE 'gigachat_%'"))
 
-        check("панель знает про поля всех провайдеров",
-              all(item["fields"] for item in providers.options())
-              and any(f["key"] == "yandex_folder_id" for f in providers.options()[1]["fields"]))
+        # У шлюза ASCN полей нет намеренно: доступ выдаётся ключом подписки,
+        # и просить владельца ввести что-то ещё было бы лишним шагом.
+        fields_by_name = {item["name"]: item["fields"] for item in providers.options()}
+        check("панель знает про поля провайдеров со своим ключом",
+              fields_by_name["openrouter"] and fields_by_name["yandex"]
+              and not fields_by_name["ascn"]
+              and any(f["key"] == "yandex_folder_id" for f in fields_by_name["yandex"]))
 
         db.set_setting("model_provider", "openrouter")
         db.set_setting("model", "openai/gpt-4o-mini")
@@ -1713,6 +1721,151 @@ def main() -> int:
         kb_mod.fetch_pending = saved["fetch_pending"]
         panel._load_pending = saved["load_pending"]
         rivals_mod.check_all = saved["rivals_check"]
+
+    # ── Подписка ──────────────────────────────────────────────────────────
+    #
+    # Продукт стоит на сервере клиента, а платит он нам. Значит, установка
+    # обязана честно гаснуть, когда подписка кончилась, и так же честно
+    # отдавать данные — иначе это удержание чужой переписки, а не защита.
+    # Подписываем ответы настоящим ключом: подделку проверка обязана отвергать.
+    section("Подписка")
+    import base64 as _b64
+    import json as _json
+    import rsa as _rsa
+    from app import license as lic
+
+    _pub, _priv = _rsa.newkeys(1024)
+    _other_pub, _other_priv = _rsa.newkeys(1024)
+
+    def sign(payload: dict, priv=None) -> str:
+        raw = _json.dumps(payload).encode()
+        signature = _rsa.sign(raw, priv or _priv, "SHA-256")
+        body = _b64.urlsafe_b64encode(raw).decode().rstrip("=")
+        tail = _b64.urlsafe_b64encode(signature).decode().rstrip("=")
+        return f"{body}.{tail}"
+
+    saved_license = {"pem": lic.PUBLIC_KEY_PEM, "required": config.LICENSE_REQUIRED}
+    lic.PUBLIC_KEY_PEM = _pub.save_pkcs1().decode()
+    config.LICENSE_REQUIRED = True
+    try:
+        install = lic.install_id()
+        db.set_setting("license_key", "ascn-test-key")
+
+        db.set_setting("license_token", sign(
+            {"key": "ascn-test-key", "install": install, "plan": "pro",
+             "until": int(time.time()) + 86400}))
+        check("оплаченная подписка активна", lic.active(), lic.state()["note"])
+
+        db.set_setting("license_token", sign(
+            {"key": "ascn-test-key", "install": install, "plan": "pro",
+             "until": int(time.time()) - 60}))
+        state = lic.state()
+        check("просроченная подписка выключает агента",
+              not state["active"] and state["mode"] == "expired", state["note"])
+
+        # Подделка: клиент поднял свой сервер лицензий и выписал себе вечность.
+        forged = sign({"key": "ascn-test-key", "install": install,
+                       "until": int(time.time()) + 10 ** 7}, _other_priv)
+        db.set_setting("license_token", forged)
+        check("подпись чужим ключом не принимается", not lic.active())
+
+        # Ключ увезли на другой сервер вместе с базой.
+        db.set_setting("license_token", sign(
+            {"key": "ascn-test-key", "install": "другая-установка",
+             "until": int(time.time()) + 86400}))
+        state = lic.state()
+        check("ключ с другого сервера не активирует установку",
+              not state["active"] and state["mode"] == "foreign", state["mode"])
+
+        # Сеть недоступна — прежний ответ продолжает действовать. Иначе наш
+        # упавший сервер выключил бы агентов у всех, кто платит.
+        good = sign({"key": "ascn-test-key", "install": install,
+                     "until": int(time.time()) + 86400})
+        db.set_setting("license_token", good)
+        db.set_setting("license_checked_at", "0")
+
+        async def dead_server(*args, **kwargs):
+            raise httpx.ConnectError("нет сети")
+
+        original_post = httpx.AsyncClient.post
+        httpx.AsyncClient.post = dead_server
+        try:
+            result = asyncio.run(lic.refresh(force=True))
+        finally:
+            httpx.AsyncClient.post = original_post
+        check("недоступный сервер подписок не выключает агента",
+              not result["ok"] and lic.active(), result["detail"])
+
+        # Панель без подписки: открыта только страница подписки и выгрузка.
+        db.set_setting("license_token", sign(
+            {"key": "ascn-test-key", "install": install, "until": int(time.time()) - 60}))
+        from starlette.testclient import TestClient
+        from app.web import main as panel_mod
+
+        saved_authed = panel_mod.authed
+        panel_mod.authed = lambda request: True
+        try:
+            with TestClient(panel_mod.app) as client:
+                closed = {path: client.get(path, follow_redirects=False).status_code
+                          for path in ("/", "/agent", "/dialogs", "/leads", "/bots")}
+                check("панель закрыта, кроме подписки",
+                      set(closed.values()) == {303}, str(closed))
+                page_resp = client.get("/subscription")
+                check("меню без подписки не водит по кругу",
+                      'href="/dialogs"' not in page_resp.text
+                      and 'href="/subscription"' in page_resp.text)
+                check("индикатор не обещает работу, которой нет",
+                      "подписка не активна" in page_resp.text
+                      and "ИИ отвечает клиентам" not in page_resp.text)
+                check("страница подписки открывается и объясняет причину",
+                      page_resp.status_code == 200
+                      and "подписка закончилась" in page_resp.text.lower())
+                export = client.get("/subscription/export")
+                check("данные отдаются архивом и после конца подписки",
+                      export.status_code == 200
+                      and export.headers["content-type"] == "application/zip"
+                      and len(export.content) > 300, str(export.status_code))
+                import io as _io
+                import zipfile as _zip
+                names = _zip.ZipFile(_io.BytesIO(export.content)).namelist()
+                check("в архиве переписка, лиды и сама база",
+                      {"dialogs.csv", "leads.csv", "data.db"} <= set(names),
+                      ", ".join(names))
+                # Вебхук без подписки отвечает 402, а не молча принимает
+                hook = client.post("/hook/telegram/1", json={"update_id": 1})
+                check("вебхук без подписки отвечает 402", hook.status_code == 402,
+                      str(hook.status_code))
+        finally:
+            panel_mod.authed = saved_authed
+
+        # Агент молчит, даже если сообщение всё-таки дошло до обработчика.
+        from app import sales as sales_mod
+        probe = db.upsert_contact("tg", "lic-1", name="Клиент")["id"]
+        before = db.q1("SELECT COUNT(*) AS c FROM messages")["c"]
+        asyncio.run(sales_mod.handle_incoming(probe, "сколько стоит?"))
+        after = db.q1("SELECT COUNT(*) AS c FROM messages")["c"]
+        check("без подписки агент не обрабатывает сообщение", before == after)
+
+        # Шлюз — тот самый замок: без активной подписки он не настроен.
+        from app.providers import ascn as gateway
+        check("шлюз модели не работает без подписки", not gateway.configured())
+        db.set_setting("license_token", good)
+        check("с подпиской шлюз готов отвечать", gateway.configured())
+        check("у шлюза нечего вводить руками", not gateway.FIELDS)
+    finally:
+        lic.PUBLIC_KEY_PEM = saved_license["pem"]
+        config.LICENSE_REQUIRED = saved_license["required"]
+        db.set_setting("license_key", "")
+        db.set_setting("license_token", "")
+
+    check("контракт для стороны ASCN описан",
+          (ROOT / "SUBSCRIPTION.md").exists()
+          and "/api/license/check" in (ROOT / "SUBSCRIPTION.md").read_text(encoding="utf-8")
+          and "SUBSCRIPTION.md" in (ROOT / "AGENT.md").read_text(encoding="utf-8"))
+    check("установщик умеет принимать ключ подписки",
+          "LICENSE_KEY" in (ROOT / "deploy/install.sh").read_text(encoding="utf-8"))
+    check("своя установка работает без подписки вообще",
+          lic.active() and lic.state()["mode"] == "self")
 
     section("Онбординг")
     progress = onboarding.progress()

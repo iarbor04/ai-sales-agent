@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from . import autochain, booking, config, db, llm, notify
+from . import autochain, booking, config, db, license, llm, notify
 from .channels import base
 
 log = logging.getLogger("sales")
@@ -45,6 +45,12 @@ async def handle_incoming(contact_id: int, text: str, media_type: str | None = N
     """Единая точка входа для любого канала."""
     contact = db.contact_by_id(contact_id)
     if contact is None:
+        return
+
+    # Второй рубеж подписки. Первый — вебхуки и панель, но сообщение могло
+    # прийти по уже открытому соединению polling: тогда молчим здесь.
+    if not license.active():
+        log.warning("подписка не активна — сообщение не обработано")
         return
 
     db.add_message(contact_id, "in", "client", text or None, media_type, media_path)

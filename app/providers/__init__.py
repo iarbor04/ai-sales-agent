@@ -5,19 +5,21 @@
 """
 from __future__ import annotations
 
-from .. import db
-from . import openrouter, yandex
+from .. import config, db
+from . import ascn, openrouter, yandex
 from .base import LLMError, LLMTruncated, human_error, tidy  # noqa: F401 — общий вход
 
-ALL = (openrouter, yandex)
-DEFAULT = openrouter.NAME
+# ascn первым: в установке из маркетплейса модель включена в подписку, и
+# владельцу не нужно ни ключа, ни карты в валюте.
+ALL = (ascn, openrouter, yandex)
+DEFAULT = ascn.NAME if config.LICENSE_REQUIRED else openrouter.NAME
 
 
 def get(name: str):
     for provider in ALL:
         if provider.NAME == name:
             return provider
-    return openrouter
+    return get(DEFAULT) if DEFAULT != name else openrouter
 
 
 def current():

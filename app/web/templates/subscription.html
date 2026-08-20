@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}Подписка · ИИ-продажник{% endblock %}
+{% block body %}
+
+{# Единственная страница, которая открывается без активной подписки. Здесь
+   владелец видит, что произошло, может ввести ключ и — главное — забрать свои
+   данные. Удерживать переписку и лидов клиента нельзя: это не защита, а повод
+   для возврата платежа и жалобы. #}
+
+<div class="topbar">
+  <div style="flex:1">
+    <h1>Подписка</h1>
+    <p class="sub">{{ license.note }}</p>
+  </div>
+  <span class="pill {{ 'ok' if license.active else 'bad' }}">
+    {{ 'активна' if license.active else 'не активна' }}
+  </span>
+</div>
+
+{% if not license.active %}
+<div class="card warn">
+  <h2>Агент не отвечает клиентам</h2>
+  <p class="lead-text" style="margin:0">
+    {% if license.mode == 'new' %}
+      Установка ещё не активирована. Введите ключ подписки из личного кабинета
+      ASCN — после этого агент начнёт работать, а панель откроется целиком.
+    {% elif license.mode == 'foreign' %}
+      Этот ключ уже работает на другом сервере. Одна подписка — одна установка:
+      возьмите второй ключ в кабинете ASCN или перенесите подписку.
+    {% elif license.mode == 'expired' %}
+      Подписка закончилась, поэтому боты выключены и панель закрыта. Продлите
+      подписку в кабинете ASCN и нажмите «Проверить подписку» — всё вернётся
+      как было, ничего настраивать заново не нужно.
+    {% else %}
+      Подписку пока не удалось подтвердить. Нажмите «Проверить подписку»: если
+      наш сервер недоступен, установка продолжит работать по прежнему ответу.
+    {% endif %}
+  </p>
+</div>
+{% endif %}
+
+<div class="card">
+  <h2>Ключ подписки</h2>
+  <form method="post" action="/subscription/activate" class="row">
+    <div class="field" style="flex:2">
+      <label>Ключ из кабинета ASCN</label>
+      <input type="text" name="key" value="{{ license_key }}" autocomplete="off"
+             placeholder="ascn-xxxx-xxxx-xxxx" spellcheck="false">
+      <span class="note">Ключ привязывается к этому серверу при первой
+        активации. Номер установки: <code>{{ install }}</code></span>
+    </div>
+    <button class="btn" type="submit">Активировать</button>
+  </form>
+  <form method="post" action="/subscription/check" style="margin-top:10px">
+    <button class="btn ghost small" type="submit">Проверить подписку</button>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Ваши данные</h2>
+  <p class="lead-text">
+    Всё, что собрал агент, остаётся вашим и доступно всегда — и когда подписка
+    активна, и когда закончилась. В архиве переписка и лиды таблицами (открываются
+    в Excel), файл базы целиком и вложения из диалогов.
+  </p>
+  <div class="grid c4" style="margin-bottom:14px">
+    <div class="stat"><div class="n">{{ counts.contacts }}</div><div class="l">клиентов</div></div>
+    <div class="stat"><div class="n">{{ counts.messages }}</div><div class="l">сообщений</div></div>
+    <div class="stat"><div class="n">{{ counts.leads }}</div><div class="l">карточек лидов</div></div>
+  </div>
+  <a class="btn" href="/subscription/export">Скачать всё архивом</a>
+</div>
+{% endblock %}

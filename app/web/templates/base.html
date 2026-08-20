@@ -68,6 +68,14 @@
     </div>
 
     <nav>
+      {% if not paid %}
+      {# Подписка кончилась: остальные разделы всё равно закрыты, и показывать
+         их значило бы водить владельца по кругу. #}
+      <a href="/subscription" class="active">
+        {{ icon('gear') }}<span class="label">Подписка</span>
+      </a>
+      <a href="/logout">{{ icon('exit') }}<span class="label">Выйти</span></a>
+      {% else %}
       <p class="navgroup">Агент</p>
       <a href="/agent" class="{{ 'active' if path.startswith('/agent') }}">
         {{ icon('bot') }}<span class="label">ИИ-продажник</span>
@@ -114,11 +122,18 @@
         {{ icon('gear') }}<span class="label">Настройки</span>
       </a>
       <a href="/logout">{{ icon('exit') }}<span class="label">Выйти</span></a>
+      {% endif %}
     </nav>
 
-    <div class="aistate {{ 'on' if ai_on else 'off' }}">
+    {# Индикатор не должен обещать работу, которой нет: без подписки агент
+       молчит независимо от галочки «ИИ отвечает клиентам». #}
+    <div class="aistate {{ 'on' if ai_on and paid else 'off' }}">
       <span class="led"></span>
-      <span>{{ 'ИИ отвечает клиентам' if ai_on else 'ИИ выключен' }}</span>
+      <span>
+        {%- if not paid %}подписка не активна
+        {%- elif ai_on %}ИИ отвечает клиентам
+        {%- else %}ИИ выключен{% endif %}
+      </span>
     </div>
   </aside>
 

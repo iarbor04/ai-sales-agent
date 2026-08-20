@@ -21,6 +21,7 @@ from fastapi.responses import (
     JSONResponse,
     PlainTextResponse,
     RedirectResponse,
+    Response,
 )
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -28,8 +29,8 @@ from itsdangerous import BadSignature, URLSafeSerializer
 
 from .. import (
     autochain, booking, broadcast, config, db, docfile, healthcheck, knowledge,
-    llm, onboarding, pricefile, providers, retrieval, rivals, sales, scheduler,
-    sheets,
+    license, llm, onboarding, pricefile, providers, retrieval, rivals, sales,
+    scheduler, sheets,
 )
 from .. import channels
 from ..channels import base, telegram, whatsapp
@@ -87,7 +88,12 @@ async def lifespan(app: FastAPI):
     db.init()
     channels.adopt_env_token()
     knowledge.reindex_extra()
-    await channels.start_all()
+    # Без подписки боты не поднимаются: принимать сообщения, которые владелец
+    # не сможет прочитать в закрытой панели, хуже, чем не принимать их вовсе.
+    if license.active():
+        await channels.start_all()
+    else:
+        log.warning("подписка не активна — боты не подняты, панель закрыта")
     await scheduler.start()
     log.info("панель на %s", config.PUBLIC_URL)
     yield
@@ -135,18 +141,114 @@ def page(request: Request, name: str, **ctx) -> HTMLResponse:
     ctx.setdefault("channels", config.CHANNEL_TITLES)
     ctx.setdefault("ai_on", db.setting("ai_enabled_global", "1") == "1")
     ctx.setdefault("setup", onboarding.progress())
+    # Меню знает про подписку: без неё все разделы вели бы обратно на страницу
+    # подписки, и владелец решил бы, что панель сломалась.
+    ctx.setdefault("paid", license.active())
     ctx.setdefault("path", request.url.path)
     return templates.TemplateResponse(request, name, ctx)
 
 
+# Что открыто, когда подписка закончилась. Данные клиента остаются его
+# данными: страница подписки отдаёт всю переписку и лидов одним архивом.
+PAID_OPEN = ("/login", "/logout", "/static", "/health", "/subscription")
+
+
 @app.middleware("http")
 async def guard(request: Request, call_next):
-    """Всё, кроме входа, вебхуков и здоровья, закрыто сессией."""
+    """Всё, кроме входа, вебхуков и здоровья, закрыто сессией.
+
+    Второй рубеж — подписка: без неё панель показывает только страницу
+    подписки и выгрузку. Клиентские каналы при этом молчат: принимать
+    сообщения, которые никто не прочитает, хуже, чем не принимать.
+    """
+    path = request.url.path
     open_paths = ("/login", "/static", "/hook", "/health",
                   "/widget.js", "/api/widget")
-    if request.url.path.startswith(open_paths) or authed(request):
-        return await call_next(request)
-    return RedirectResponse("/login", status_code=303)
+    if not (path.startswith(open_paths) or authed(request)):
+        return RedirectResponse("/login", status_code=303)
+
+    if not path.startswith(PAID_OPEN) and not license.active():
+        if path.startswith(("/hook", "/api/widget", "/widget.js")):
+            return JSONResponse({"ok": False, "detail": "подписка не активна"}, status_code=402)
+        return RedirectResponse("/subscription", status_code=303)
+    return await call_next(request)
+
+
+# ── подписка ───────────────────────────────────────────────────────────
+
+@app.get("/subscription", response_class=HTMLResponse)
+async def subscription_page(request: Request):
+    """Состояние подписки, активация ключом и выгрузка своих данных."""
+    return page(request, "subscription.html",
+                license=license.state(),
+                license_key=license.key(),
+                install=license.install_id(),
+                counts={
+                    "contacts": db.q1("SELECT COUNT(*) AS c FROM contacts")["c"],
+                    "messages": db.q1("SELECT COUNT(*) AS c FROM messages")["c"],
+                    "leads": db.q1("SELECT COUNT(*) AS c FROM leads")["c"],
+                })
+
+
+@app.post("/subscription/activate")
+async def subscription_activate(key: str = Form("")):
+    result = await license.activate(key)
+    mark = "ok" if result["ok"] else "error"
+    return RedirectResponse(f"/subscription?{mark}=" + quote(result["detail"]),
+                            status_code=303)
+
+
+@app.post("/subscription/check")
+async def subscription_check():
+    result = await license.refresh(force=True)
+    mark = "ok" if result["ok"] else "error"
+    return RedirectResponse(f"/subscription?{mark}=" + quote(result["detail"]),
+                            status_code=303)
+
+
+@app.get("/subscription/export")
+async def subscription_export():
+    """Архив со всеми данными: переписка, лиды, база знаний, вложения.
+
+    Работает и после конца подписки — иначе это удержание чужих данных, а не
+    продажа софта. Собираем в памяти: базы такого размера укладываются в
+    десятки мегабайт, временный файл на диске тут только мешал бы.
+    """
+    import csv
+    import io
+    import zipfile
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        # Таблицы — в CSV: их открывают в Excel, а не в sqlite3.
+        for table, query in (
+            ("dialogs", "SELECT c.channel, c.name, c.username, c.phone,"
+                        " m.direction, m.author, m.text, m.created_at"
+                        " FROM messages m JOIN contacts c ON c.id = m.contact_id"
+                        " ORDER BY m.id"),
+            ("leads", "SELECT l.*, c.channel, c.username, c.phone"
+                      " FROM leads l JOIN contacts c ON c.id = l.contact_id"
+                      " ORDER BY l.id"),
+            ("knowledge", "SELECT url, title, chars, status, text FROM kb_pages ORDER BY id"),
+        ):
+            rows = db.q(query)
+            text = io.StringIO()
+            writer = csv.writer(text, delimiter=";")
+            if rows:
+                writer.writerow(rows[0].keys())
+                writer.writerows([tuple(row) for row in rows])
+            archive.writestr(f"{table}.csv", text.getvalue())
+
+        # И сама база: из неё восстанавливается всё, включая настройки.
+        if config.DB_PATH.exists():
+            archive.write(config.DB_PATH, "data.db")
+        for item in sorted(config.MEDIA_DIR.glob("*")) if config.MEDIA_DIR.exists() else []:
+            if item.is_file():
+                archive.write(item, f"media/{item.name}")
+
+    stamp = datetime.now().strftime("%Y-%m-%d")
+    return Response(buffer.getvalue(), media_type="application/zip", headers={
+        "Content-Disposition": f'attachment; filename="ascn-export-{stamp}.zip"'})
 
 
 @app.get("/health")

@@ -9,8 +9,8 @@ import asyncio
 import logging
 import os
 
-from . import (autochain, booking, broadcast, config, db, healthcheck, knowledge,
-                retrieval, rivals, sheets)
+from . import (autochain, booking, broadcast, channels, config, db, healthcheck,
+                knowledge, license, retrieval, rivals, sheets)
 
 log = logging.getLogger("scheduler")
 
@@ -30,7 +30,33 @@ async def _health() -> None:
     await healthcheck.run_and_alert()
 
 
+async def _subscription() -> None:
+    """Раз в полсуток спрашиваем ASCN, оплачено ли, и гасим или поднимаем ботов.
+
+    Подписку продлили — агент оживает сам, без перезапуска службы; кончилась —
+    боты уходят, чтобы клиенты не писали в панель, которую владелец не откроет.
+    """
+    if not config.LICENSE_REQUIRED:
+        return
+    was = license.active()
+    await license.refresh()
+    now_active = license.active()
+    if now_active == was:
+        return
+    if now_active:
+        log.info("подписка активна — поднимаю ботов")
+        await channels.start_all()
+    else:
+        log.warning("подписка закончилась — гашу ботов")
+        await channels.stop_all()
+
+
 async def _tick() -> None:
+    await _subscription()
+    # Без подписки фоновая работа не нужна: рассылки и автоцепочки уходят
+    # клиентам от лица владельца, а он за это уже не платит.
+    if not license.active():
+        return
     await broadcast.due()
     await autochain.process_due()
     await _health()

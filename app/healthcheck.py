@@ -13,7 +13,7 @@ import json
 import logging
 import os
 
-from . import channels, config, db, llm, notify
+from . import channels, config, db, license, llm, notify
 
 log = logging.getLogger("healthcheck")
 
@@ -24,6 +24,12 @@ STUCK_JOB_MINUTES = 60
 async def run() -> dict:
     """Собрать состояние. Ничего не чинит и никого не будит — только смотрит."""
     problems: list[str] = []
+
+    # Подписка — первым: когда она кончилась, остальные замечания бессмысленны,
+    # агент и так молчит, и владельцу нужно видеть именно эту причину.
+    subscription = license.state()
+    if not subscription["active"]:
+        problems.append(f"подписка не активна: {subscription['note']}")
 
     # Живые боты — это объекты в памяти службы. Из отдельного процесса их не
     # видно, и наивная проверка объявила бы мёртвыми вообще всех.

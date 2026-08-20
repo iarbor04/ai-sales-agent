@@ -57,6 +57,19 @@ def whatsapp_enabled() -> bool:
     return bool(WA_TOKEN and WA_PHONE_ID)
 
 
+# ── подписка ───────────────────────────────────────────────────────────
+# Установка из маркетплейса ASCN проверяет подписку и гасится, когда та
+# закончилась. Своя установка (сам поставил, свой ключ модели) живёт без
+# этого: LICENSE_REQUIRED=0 по умолчанию, иначе обновление выключило бы
+# всех, кто поднял проект до появления подписок.
+LICENSE_REQUIRED = _env("LICENSE_REQUIRED", "0").strip() in ("1", "true", "yes", "on")
+LICENSE_KEY = _env("LICENSE_KEY")
+LICENSE_URL = _env("LICENSE_URL", "https://ascn.ai").rstrip("/")
+# Шлюз модели: агент из маркетплейса ходит за ответами сюда, ключом подписки.
+GATEWAY_URL = _env("GATEWAY_URL", "https://gateway.ascn.ai").rstrip("/")
+# Публичный ключ ASCN в PEM. Им проверяется подпись ответа о подписке.
+LICENSE_PUBLIC_KEY = _env("LICENSE_PUBLIC_KEY").replace("\\n", "\n")
+
 # ── модель ─────────────────────────────────────────────────────────────
 OPENROUTER_API_KEY = _env("OPENROUTER_API_KEY")
 # Модель по умолчанию; владелец меняет её в Настройках из списка доступных.
