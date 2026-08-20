@@ -125,7 +125,7 @@
     </div>
 
     {% if b.role == 'sales' %}
-    <div class="field"><label>Приветствие на /start (пусто — общее из Настроек)</label>
+    <div class="field"><label>Приветствие на /start (пусто — общее, из вкладки «Разговор»)</label>
       <textarea name="greeting">{{ b.greeting or '' }}</textarea></div>
     <label class="check">
       <input type="checkbox" name="script_enabled" {{ 'checked' if b.script_enabled }}>
@@ -133,8 +133,8 @@
     </label>
     <p class="muted small">
       Без галочки бот отвечает свободно по базе знаний.
-      С галочкой — идёт по шагам из раздела
-      <a href="/script?bot={{ b.id }}">Сценарий</a>.
+      С галочкой — идёт по шагам своего
+      <a href="/agent?bot={{ b.id }}#script">сценария</a>.
     </p>
     {% else %}
     <p class="muted small">

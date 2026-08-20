@@ -378,15 +378,22 @@ async def reload() -> None:
 
 
 async def check_token(token: str) -> dict:
-    """Проверить токен до сохранения: жив ли и чей он."""
-    probe = Bot(token.strip())
+    """Проверить токен до сохранения: жив ли и чей он.
+
+    Bot(...) сам проверяет формат и бросает исключение, поэтому создаём его
+    внутри try: снаружи он ронял страницу «Боты» пятисотой, стоило вставить
+    токен с опечаткой — а это первое, что делает новичок.
+    """
+    probe = None
     try:
+        probe = Bot(token.strip())
         me = await probe.get_me()
         return {"ok": True, "username": me.username, "name": me.full_name}
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "error": str(exc)[:200]}
     finally:
-        await probe.session.close()
+        if probe is not None:
+            await probe.session.close()
 
 
 async def feed(bot_id: int, payload: dict) -> None:

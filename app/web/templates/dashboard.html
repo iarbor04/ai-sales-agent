@@ -15,7 +15,7 @@
 <div class="card setup">
   <div class="row between">
     <h2 style="margin:0">Настройка — готово {{ setup.done }} из {{ setup.total }}</h2>
-    <a class="btn small" href="/onboarding">Продолжить настройку</a>
+    <a class="btn small" href="/agent">Продолжить настройку</a>
   </div>
   <div class="bar"><i style="width: {{ (setup.done / setup.total * 100) | round }}%"></i></div>
   {% if setup.next %}

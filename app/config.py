@@ -18,13 +18,6 @@ def _int(key: str, default: int) -> int:
         return default
 
 
-def _bool(key: str, default: bool = False) -> bool:
-    value = _env(key).lower()
-    if not value:
-        return default
-    return value in ("1", "true", "yes", "on")
-
-
 def _load_dotenv() -> None:
     """Минимальный парсер .env — без зависимости от python-dotenv."""
     path = BASE_DIR / ".env"
@@ -62,15 +55,6 @@ def telegram_enabled() -> bool:
 
 def whatsapp_enabled() -> bool:
     return bool(WA_TOKEN and WA_PHONE_ID)
-
-
-def active_channels() -> list[str]:
-    channels = []
-    if telegram_enabled():
-        channels.append("tg")
-    if whatsapp_enabled():
-        channels.append("wa")
-    return channels
 
 
 # ── модель ─────────────────────────────────────────────────────────────

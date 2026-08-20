@@ -198,12 +198,12 @@ async def media(name: str):
     return FileResponse(path)
 
 
-@app.get("/onboarding", response_class=HTMLResponse)
-async def onboarding_page(request: Request):
-    return page(request, "onboarding.html")
+@app.get("/onboarding")
+async def onboarding_page():
+    """Чек-лист жил в трёх местах: мастер запуска, эта страница и страница
+    агента. Осталось одно — там же, где всё остальное про агента."""
+    return RedirectResponse("/agent", status_code=303)
 
-
-# ── все модели для выпадающего списка ──────────────────────────────────
 
 @app.get("/api/models")
 async def api_models():

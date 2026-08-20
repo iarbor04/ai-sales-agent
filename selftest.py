@@ -608,6 +608,58 @@ def main() -> int:
     check("очереди-пустышки retry_queue больше нет", "retry_queue" not in tables_now)
     sched = (ROOT / "app/scheduler.py").read_text()
     check("планировщик её не зовёт", "retry_queue" not in sched)
+    # Каша набегает незаметно: страницу удалили, а её стили и функции остались.
+    # Разворачивать это будет агент, который читает код буквально, поэтому
+    # мёртвые куски ищем автоматически, а не глазами.
+    sources = sorted(ROOT.glob("app/**/*.py")) + [ROOT / "run.py"]
+    everything = "\n".join(path.read_text(encoding="utf-8") for path in sources)
+    everything += "\n".join(path.read_text(encoding="utf-8")
+                            for path in (ROOT / "app/web/templates").rglob("*.html"))
+    everything += (ROOT / "selftest.py").read_text(encoding="utf-8")
+    orphans = []
+    for path in sources:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            # маршруты и обработчики зовёт фреймворк по декоратору
+            if node.decorator_list or node.name.startswith("__") or node.name == "main":
+                continue
+            if everything.count(node.name) <= 1:
+                orphans.append(f"{path.relative_to(ROOT)}:{node.lineno} {node.name}()")
+    check("функций, которых никто не зовёт, нет", not orphans, "; ".join(orphans))
+
+    used_classes: set[str] = set()
+    for tpl in (ROOT / "app/web/templates").rglob("*.html"):
+        markup = tpl.read_text(encoding="utf-8")
+        # Внутри class="" половина значений — условия Jinja. Вырезаем их, иначе
+        # в «классы» попадают куски кода вроде path.startswith('/bots').
+        markup = re.sub(r"\{\{.*?\}\}|\{%.*?%\}", " ", markup, flags=re.S)
+        for value in re.findall(r'class="([^"]*)"', markup):
+            used_classes |= {word for word in value.split() if word}
+    css_src = (ROOT / "app/web/static/style.css").read_text(encoding="utf-8")
+    css_classes = set(re.findall(r"^\.([a-z][a-z0-9-]{2,})", css_src, re.M))
+    # Классы, которые ставит JS на живой странице, в разметке не встречаются.
+    by_script = {"drag", "over", "sending", "open"}
+    dead_css = sorted(css_classes - used_classes - by_script)
+    check("стилей от удалённых страниц не осталось", not dead_css, ", ".join(dead_css))
+    # И в обратную сторону: класс в разметке без правила означает страницу без
+    # оформления. Ровно так «Обзор» потерял карточку следующего шага, когда я
+    # чистил стили удалённых страниц и заодно снёс нужные.
+    styled = set(re.findall(r"\.([a-z][a-z0-9-]*)", css_src))
+    layout = {"row", "col", "field", "note", "hint", "small", "muted", "dim",
+              "right", "left", "center", "tight", "between", "big", "ghost",
+              "danger", "large", "warn", "off", "ok", "bad", "done", "now",
+              "active", "on", "mono", "filled", "label", "body", "text", "sub"}
+    # Классы-зацепки для скриптов оформления не имеют по определению: их ищет
+    # JS. Отличаем их не списком, а по факту упоминания в скрипте страницы.
+    scripts = " ".join(re.findall(r"<script>(.*?)</script>", "".join(
+        tpl.read_text(encoding="utf-8")
+        for tpl in (ROOT / "app/web/templates").rglob("*.html")), re.S))
+    hooks = {name for name in used_classes if name in scripts}
+    unstyled = sorted(used_classes - styled - layout - hooks)
+    check("у каждого класса в разметке есть правило", not unstyled, ", ".join(unstyled))
+
     vk_src = (ROOT / "app/channels/vk.py").read_text()
     check("ВК грузит не только картинки",
           "docs.getMessagesUploadServer" in vk_src and "audio_message" in vk_src)
@@ -1499,6 +1551,168 @@ def main() -> int:
     check("разница по строкам считается", "150" in diff and "100" in diff, diff[:60])
     check("неизменное в разницу не попадает", "Доставка" not in diff)
     check("обход по расписанию определяется", rivals.due() is True)
+
+    # ── Панель целиком: открыть каждую страницу и нажать каждую кнопку ────
+    #
+    # Остальные проверки смотрят на код и текст шаблонов. Этот раздел ходит по
+    # панели по-настоящему: после переноса форм на страницу агента ни одна
+    # проверка не нажимала их, и сломанный маршрут дожил бы до владельца.
+    # Сеть подменяем: проверяем панель, а не Telegram и не OpenRouter.
+    section("Панель: каждая страница и каждая кнопка")
+
+    from starlette.testclient import TestClient
+    from app import knowledge as kb_mod, rivals as rivals_mod
+    from app.channels import base as chan_base
+    from app.web import main as panel
+
+    saved = {
+        "authed": panel.authed,
+        "send": chan_base.send,
+        "discover": kb_mod.discover,
+        "fetch_pending": kb_mod.fetch_pending,
+        "load_pending": panel._load_pending,
+        "rivals_check": rivals_mod.check_all,
+    }
+    sent_messages: list = []
+
+    async def fake_send(*args, **kwargs):
+        sent_messages.append((args, kwargs))
+        return True
+
+    async def noop_async(*args, **kwargs):
+        return {}
+
+    panel.authed = lambda request: True
+    chan_base.send = fake_send
+    kb_mod.discover = lambda *a, **k: {"found": 0}
+    kb_mod.fetch_pending = lambda *a, **k: {"loaded": 0}
+    panel._load_pending = noop_async
+    rivals_mod.check_all = noop_async
+
+    def walk(client, method: str, path: str, **kwargs) -> str:
+        """Дёрнуть маршрут и вернуть человеческий итог вместо исключения."""
+        try:
+            response = client.request(method, path, follow_redirects=False, **kwargs)
+        except Exception as exc:  # noqa: BLE001 — 500 в TestClient прилетает так
+            return f"упал: {type(exc).__name__}: {exc}"
+        if response.status_code >= 500:
+            return f"{response.status_code}"
+        return ""
+
+    try:
+        with TestClient(panel.app) as client:
+            # данные, на которые будут ссылаться кнопки
+            bot_id = db.add_bot("Проверочный", "111:AAA", role="sales")
+            contact_id = db.upsert_contact("tg", "900", name="Клиент")["id"]
+            db.add_message(contact_id, "in", "client", "сколько стоит доставка?")
+            db.upsert_lead(contact_id, {"name": "Клиент"})
+            step_id = db.q1("SELECT id FROM script_steps ORDER BY position DESC")["id"]
+
+            pages = [path for path in sorted(
+                {r.path for r in panel.app.routes
+                 if "GET" in (getattr(r, "methods", set()) or set())})
+                if "{" not in path
+                and path not in ("/openapi.json", "/redoc", "/docs", "/logout",
+                                 "/knowledge/test", "/settings/ai/check",
+                                 "/settings/sheets/check", "/api/widget/poll",
+                                 "/hook/whatsapp", "/widget.js")]
+            broken = [f"{path} → {result}" for path in pages
+                      if (result := walk(client, "GET", path))]
+            check(f"страницы панели открываются ({len(pages)} шт.)",
+                  not broken, "; ".join(broken))
+
+            # Кнопки. Пропущены только те, что уходят наружу или необратимы —
+            # у каждой причина, чтобы следующий не гадал.
+            skipped = {
+                "/broadcast/{id}/confirm": "отправляет сообщения клиентам",
+                "/bots/reload": "поднимает боты в Telegram",
+                "/knowledge/refresh": "обходит сайт клиента",
+                "/settings/sheets/sync": "пишет в Google Таблицу",
+                "/hook/*": "вебхуки проверены отдельным разделом",
+                "/api/widget/*": "виджет проверен отдельным разделом",
+            }
+            actions = [
+                ("/agent/prompt", {"agent_role": "консультант", "tone": "тепло",
+                                   "reply_length": "short", "handoff_buy": "on",
+                                   "prompt_extra": "Скидки не обещаем."}),
+                ("/agent/prompt/template", {"prompt_template": "Ты продавец. " * 10}),
+                ("/settings", {"back": "/agent#model", "ai_toggle": "1",
+                               "ai_enabled_global": "on", "model": "deepseek/deepseek-v4-flash"}),
+                ("/settings", {"back": "/agent#handoff", "operator_chat_id": "-100",
+                               "managers": "Анна", "handoff_note": "Передаю менеджеру"}),
+                ("/settings/health", {}),
+                ("/knowledge/extra", {"text": "Доставка 500 ₽"}),
+                ("/knowledge/discover", {"site": "example.com"}),
+                ("/knowledge/schedule", {"hours": "12"}),
+                ("/knowledge/select", {}),
+                ("/leads/stages", {"titles": "Новый, В работе, Купил", "wons": "Купил"}),
+                (f"/leads/{contact_id}/stage", {"stage": "В работе"}),
+                (f"/leads/{contact_id}/save", {"name": "Клиент", "contact": "@nick",
+                                               "product": "шляпа", "deadline": "май",
+                                               "note": "спешит"}),
+                (f"/dialogs/{contact_id}/take", {}),
+                (f"/dialogs/{contact_id}/reply", {"text": "Здравствуйте!"}),
+                (f"/dialogs/{contact_id}/return-ai", {}),
+                ("/script/template", {"bot_id": "", "template": "shop"}),
+                ("/script/save", {"bot_id": "", "new_title": "Бюджет",
+                                  "new_goal": "выяснить сумму"}),
+                (f"/script/step/{step_id}/delete", {}),
+                ("/broadcast", {"text": "Привет!", "stage": "", "action": "draft"}),
+                ("/autochains", {"name": "Догоняем", "delay.0": "60",
+                                 "enabled.0": "on", "text.0.ru": "Ещё актуально?"}),
+                ("/booking/settings", {"enabled": "on", "work_from": "10:00",
+                                       "work_to": "19:00", "slot_minutes": "60"}),
+                ("/booking/service", {"title": "Стрижка", "minutes": "60", "price": "1500"}),
+                ("/booking/staff", {"name": "Аня"}),
+                ("/rivals/add", {"url": "https://example.com/price"}),
+                ("/rivals/settings", {"hours": "24"}),
+                ("/widget/save", {"title": "Чат", "greeting": "Здравствуйте!",
+                                  "color": "#1f7a4d"}),
+                ("/bots/add", {"platform": "tg", "token": "нежизнеспособный",
+                               "role": "sales", "title": "Тест"}),
+                (f"/bots/{bot_id}/save", {"title": "Проверочный", "role": "sales",
+                                          "greeting": "Привет", "enabled": "on"}),
+            ]
+            failures = [f"{path} → {result}" for path, data in actions
+                        if (result := walk(client, "POST", path, data=data))]
+
+            # загрузка прайса файлом — отдельно, это multipart
+            csv = "Товар;Цена\nШляпа;3000\n".encode("utf-8")
+            result = walk(client, "POST", "/knowledge/file",
+                          files={"file": ("price.csv", csv, "text/csv")})
+            if result:
+                failures.append(f"/knowledge/file → {result}")
+
+            check(f"кнопки в панели работают ({len(actions) + 1} шт.)",
+                  not failures, "; ".join(failures))
+            check("пропущены только внешние и необратимые кнопки",
+                  len(skipped) == 6 and all(reason for reason in skipped.values()))
+
+            # то, что кнопки должны были сделать, а не просто ответить 303
+            check("ответ менеджера ушёл клиенту",
+                  any("Здравствуйте!" in str(call) for call in sent_messages))
+            check("прайс из файла попал в базу знаний",
+                  "Шляпа" in (db.q1("SELECT text FROM kb_pages WHERE url LIKE 'file:%'"
+                                    " ORDER BY id DESC") or {"text": ""})["text"])
+            check("шаг сценария добавился кнопкой",
+                  any(row["title"] == "Бюджет" for row in db.q(
+                      "SELECT title FROM script_steps WHERE bot_id IS NULL")))
+            check("рассылка сохранилась черновиком",
+                  bool(db.q1("SELECT 1 FROM broadcasts WHERE status = 'draft'")))
+            check("автоцепочка создалась",
+                  bool(db.q1("SELECT 1 FROM autochains WHERE name = 'Догоняем'")))
+            check("лид записался с полями",
+                  (db.q1("SELECT product FROM leads WHERE contact_id = ?", (contact_id,))
+                   or {"product": ""})["product"] == "шляпа")
+            check("неживой токен бота не добавился, а объяснился",
+                  not db.q1("SELECT 1 FROM bots WHERE token = 'нежизнеспособный'"))
+    finally:
+        panel.authed = saved["authed"]
+        chan_base.send = saved["send"]
+        kb_mod.discover = saved["discover"]
+        kb_mod.fetch_pending = saved["fetch_pending"]
+        panel._load_pending = saved["load_pending"]
+        rivals_mod.check_all = saved["rivals_check"]
 
     section("Онбординг")
     progress = onboarding.progress()

@@ -84,59 +84,9 @@
 </form>
 
 <script>
-// Вкладки провайдера: показываем поля только выбранного, остальные не мешают.
-document.querySelectorAll('.provider-tab').forEach(tab => {
-  tab.addEventListener('click', () => {
-    document.querySelectorAll('.provider-tab').forEach(t => t.classList.remove('on'));
-    document.querySelectorAll('.provider-pane').forEach(pane => {
-      pane.hidden = pane.dataset.provider !== tab.dataset.provider;
-    });
-    tab.classList.add('on');
-    document.getElementById('model-provider').value = tab.dataset.provider;
-  });
-});
-
-// Список моделей у OpenRouter длинный, но грузим его целиком: владельцу
-// нужен именно выбор, а не наш короткий список «рекомендованного».
-async function loadModels() {
-  const select = document.getElementById('mselect');
-  if (select.options.length > 1) return;
-
-  const resp = await fetch('/api/models');
-  const rows = await resp.json();
-  if (!rows.length) return;
-
-  const chosen = select.value;
-  select.innerHTML = '';
-  rows.forEach(row => {
-    const opt = document.createElement('option');
-    opt.value = row.id;
-    opt.textContent = row.id;
-    if (row.id === chosen) opt.selected = true;
-    select.appendChild(opt);
-  });
-  document.getElementById('mcount').innerHTML =
-    'Доступно моделей: <b>' + rows.length + '</b>. ' +
-    'Дешевле и быстрее — модели с пометкой mini или flash.';
-}
-
-// Проверка ключа и модели одной кнопкой: список моделей отдаётся без ключа,
-// поэтому «модели загрузились» ничего не доказывает.
-async function checkAi() {
-  const out = document.getElementById('aiout');
-  out.style.color = '';
-  out.textContent = 'проверяю…';
-  try {
-    const resp = await fetch('/settings/ai/check');
-    const data = await resp.json();
-    out.textContent = 'Ключ: ' + data.key.detail + '. Модель: ' + data.model.detail;
-    if (!data.key.ok || !data.model.ok) out.style.color = 'var(--danger)';
-  } catch (err) {
-    out.style.color = 'var(--danger)';
-    out.textContent = 'Проверка не выполнена: ' + err;
-  }
-}
-
+// Проверка связи с Google Таблицей — единственный скрипт на этой странице.
+// Вкладки провайдера и список моделей уехали вместе с блоком «Модель» на
+// страницу агента; их код здесь дёргал элементы, которых больше нет.
 async function checkSheets() {
   const out = document.getElementById('sheetsout');
   out.style.display = 'block';
@@ -145,7 +95,5 @@ async function checkSheets() {
   const data = await resp.json();
   out.textContent = 'База знаний: ' + data.kb + '\nCRM: ' + data.crm;
 }
-
-loadModels();
 </script>
 {% endblock %}

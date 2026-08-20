@@ -850,18 +850,6 @@ def script(bot_id: int | None = None) -> list[sqlite3.Row]:
     return q("SELECT * FROM script_steps WHERE bot_id IS NULL AND enabled = 1 ORDER BY position")
 
 
-def current_step(contact_id: int) -> sqlite3.Row | None:
-    """Шаг, на котором стоит разговор с этим контактом."""
-    contact = contact_by_id(contact_id)
-    if contact is None:
-        return None
-    steps = script(contact["bot_id"])
-    if not steps:
-        return None
-    index = min(contact["step"], len(steps) - 1)
-    return steps[index]
-
-
 def advance_step(contact_id: int) -> None:
     contact = contact_by_id(contact_id)
     if contact is None:
