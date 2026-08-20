@@ -35,7 +35,10 @@ fi
 echo "== системные пакеты"
 export DEBIAN_FRONTEND=noninteractive
 $SUDO apt-get update -qq
-$SUDO apt-get install -y -qq python3-venv python3-pip sqlite3 nginx >/dev/null
+# curl нужен самому скрипту: определить внешний IP и дождаться ответа службы.
+# nginx ставит nginx.sh — базовой установке домен не нужен, а лишняя служба
+# на 80-м порту сбивает с толку.
+$SUDO apt-get install -y -qq python3-venv python3-pip sqlite3 curl >/dev/null
 
 echo "== виртуальное окружение"
 [ -d "$APP_DIR/.venv" ] || $PYTHON -m venv "$APP_DIR/.venv"
@@ -43,15 +46,43 @@ echo "== виртуальное окружение"
 "$APP_DIR/.venv/bin/pip" install -q -r "$APP_DIR/requirements.txt"
 
 echo "== конфигурация"
-if [ ! -f "$APP_DIR/.env" ]; then
-  cp "$APP_DIR/.env.example" "$APP_DIR/.env"
-  # генерируем секрет сразу, чтобы он не остался из примера
-  SECRET=$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')
-  sed -i "s#^SECRET_KEY=.*#SECRET_KEY=$SECRET#" "$APP_DIR/.env"
-  echo "   создан .env — впишите токены перед запуском"
-else
-  echo "   .env уже есть, не трогаем"
+[ -f "$APP_DIR/.env" ] || cp "$APP_DIR/.env.example" "$APP_DIR/.env"
+
+# Заполняем то, что раньше приходилось дописывать руками после установки:
+# пароль панели, секрет сессий и публичный адрес. Уже заданное не трогаем —
+# повторный запуск не должен менять пароль работающей установки.
+set_env() {  # ключ значение
+  if grep -qE "^$1=" "$APP_DIR/.env"; then
+    sed -i "s#^$1=.*#$1=$2#" "$APP_DIR/.env"
+  else
+    printf '%s=%s\n' "$1" "$2" >> "$APP_DIR/.env"
+  fi
+}
+get_env() { grep -E "^$1=" "$APP_DIR/.env" 2>/dev/null | head -1 | cut -d= -f2- | tr -d ' '; }
+
+if [ -z "$(get_env SECRET_KEY)" ]; then
+  set_env SECRET_KEY "$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
 fi
+
+PASSWORD=$(get_env ADMIN_PASSWORD)
+case "$PASSWORD" in
+  ""|admin|смените-обязательно)
+    # 12 символов без похожих друг на друга: пароль диктуют голосом и в чат
+    PASSWORD=$(LC_ALL=C tr -dc 'A-HJ-NP-Za-km-z2-9' < /dev/urandom | head -c 12)
+    set_env ADMIN_PASSWORD "$PASSWORD"
+    NEW_PASSWORD=1
+    ;;
+esac
+
+PORT_SET=$(get_env PORT); PORT_SET=${PORT_SET:-8000}
+PUBLIC=$(get_env PUBLIC_URL)
+case "$PUBLIC" in
+  ""|http://localhost*)
+    IP=$(curl -4 -s --max-time 5 ifconfig.me || hostname -I | awk '{print $1}')
+    PUBLIC="http://${IP:-127.0.0.1}:$PORT_SET"
+    set_env PUBLIC_URL "$PUBLIC"
+    ;;
+esac
 
 # Порт занят другой установкой — вторая копия молча не поднимется, а статус
 # покажет здоровье первой. Проверяем до создания службы.
@@ -97,12 +128,26 @@ $SUDO systemctl daemon-reload
 $SUDO systemctl enable $SERVICE >/dev/null 2>&1 || true
 $SUDO systemctl restart $SERVICE
 
-sleep 3
 echo "== проверка"
+# Ждём ответа службы, а не спим наугад: на медленной машине трёх секунд мало,
+# и установка объявляла бы поломку на живом сервисе.
+for _ in $(seq 1 20); do
+  curl -sf "http://127.0.0.1:$PORT_SET/health" >/dev/null 2>&1 && break
+  sleep 2
+done
 bash "$APP_DIR/deploy/status.sh"
 
 echo
-echo "ГОТОВО. Дальше:"
-echo "  1. Впишите токены:  nano $APP_DIR/.env"
-echo "  2. Перезапустите:   bash $APP_DIR/deploy/deploy.sh"
-echo "  3. Публичный адрес: bash $APP_DIR/deploy/nginx.sh ВАШ.ДОМЕН"
+echo "================ ГОТОВО ================"
+echo "Панель:  $PUBLIC"
+echo "Логин:   $(get_env ADMIN_LOGIN)"
+if [ -n "${NEW_PASSWORD:-}" ]; then
+  echo "Пароль:  $PASSWORD"
+else
+  echo "Пароль:  прежний, из $APP_DIR/.env"
+fi
+echo "========================================"
+echo
+echo "Больше ничего вписывать не нужно: бота и ключ модели владелец добавляет"
+echo "в панели, раздел «ИИ-продажник» ведёт по шагам."
+echo "Своё доменное имя с HTTPS: bash $APP_DIR/deploy/nginx.sh ВАШ.ДОМЕН"

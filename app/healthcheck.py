@@ -62,6 +62,12 @@ async def run() -> dict:
     if not db.setting("operator_chat_id", "").strip():
         problems.append("не задан чат менеджера — уведомления никуда не уходят")
 
+    # Панель открыта в интернет, и пароль по умолчанию означает, что в неё
+    # войдёт любой: там вся переписка клиентов и их контакты.
+    if config.ADMIN_PASSWORD in ("", "admin", "смените-обязательно"):
+        problems.append("пароль панели стандартный — впишите свой в .env "
+                        "(строка ADMIN_PASSWORD) и перезапустите")
+
     state = {
         "checked_at": db.now(),
         "problems": problems,

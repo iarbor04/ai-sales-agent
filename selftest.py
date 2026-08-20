@@ -16,6 +16,7 @@ import ast
 import asyncio
 import os
 import pathlib
+import re
 import sys
 import tempfile
 import time
@@ -443,9 +444,51 @@ def main() -> int:
     check("провайдеры согласны про модель по умолчанию",
           providers_mod.openrouter.DEFAULT_MODEL == "deepseek/deepseek-v4-flash",
           providers_mod.openrouter.DEFAULT_MODEL)
+    # Коробка: агент клонирует репозиторий и запускает одну команду. Всё, что
+    # ниже, ловит расхождение обещаний с делом — от него страдает не тест, а
+    # тот, кто в три ночи разворачивает это клиенту.
     example = (ROOT / ".env.example").read_text(encoding="utf-8")
-    check("пример .env не обещает лишних переменных",
-          "SHEETS_SYNC_MINUTES" not in example and "OPENROUTER_MODEL" in example)
+    example_keys = {line.split("=")[0] for line in example.splitlines()
+                    if line and not line.startswith("#") and "=" in line}
+    config_src = (ROOT / "app/config.py").read_text(encoding="utf-8")
+    read_by_code = set(re.findall(r'_(?:env|int|bool)\("([A-Z_]+)"', config_src))
+    check("в примере .env нет переменных, которых код не читает",
+          example_keys <= read_by_code,
+          ", ".join(sorted(example_keys - read_by_code)))
+    # Читается кодом, но в примере намеренно не показано: либо служебное, либо
+    # оставлено ради старых установок.
+    hidden = {"WEBHOOK_SECRET", "CRAWL_TIMEOUT", "TELEGRAM_BOT_TOKEN",
+              "OPENROUTER_API_KEY", "OPENROUTER_MODEL", "SERVICE_NAME"}
+    check("в примере .env есть всё, что нужно владельцу",
+          read_by_code - example_keys <= hidden,
+          ", ".join(sorted(read_by_code - example_keys - hidden)))
+
+    install_sh = (ROOT / "deploy/install.sh").read_text(encoding="utf-8")
+    check("установщик сам задаёт пароль, секрет и адрес панели",
+          all(f'set_env {key}' in install_sh
+              for key in ("ADMIN_PASSWORD", "SECRET_KEY", "PUBLIC_URL")))
+    check("установщик печатает доступы, а не оставляет их искать",
+          "ГОТОВО" in install_sh and "Логин:" in install_sh and "Пароль:" in install_sh)
+    check("повторная установка не меняет заданный пароль",
+          '""|admin|смените-обязательно' in install_sh)
+    check("установка ждёт ответа службы, а не спит наугад",
+          "/health" in install_sh and "sleep 3" not in install_sh)
+    check("nginx ставится только там, где он нужен",
+          "nginx" not in install_sh.split("apt-get install")[1].split("\n")[0]
+          and "apt-get install -y -qq nginx" in
+          (ROOT / "deploy/nginx.sh").read_text(encoding="utf-8"))
+
+    agent_md = (ROOT / "AGENT.md").read_text(encoding="utf-8")
+    readme_md = (ROOT / "README.md").read_text(encoding="utf-8")
+    gone = ["Мастер запуска", "Настройки → Тон общения", "27 проверок", "27 тестов"]
+    check("инструкции не ссылаются на удалённые разделы",
+          not [name for name in gone if name in agent_md or name in readme_md],
+          ", ".join(name for name in gone if name in agent_md or name in readme_md))
+    check("инструкция для агента даёт запуск двумя командами",
+          "git clone https://github.com/iarbor04/ai-sales-agent.git /opt/ai-sales" in agent_md
+          and "deploy/install.sh" in agent_md)
+    check("в репозитории нет внутренних черновиков",
+          not (ROOT / "docs").exists())
     reset_sh = (ROOT / "deploy/reset.sh").read_text(encoding="utf-8")
     check("сброс требует подтверждения словом", 'ANSWER" = "СБРОС' in reset_sh)
     check("сброс делает бэкап перед удалением",
