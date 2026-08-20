@@ -518,10 +518,17 @@ label { display: block; font-size: 12.5px; color: var(--text-2); margin-bottom: 
 .hero .btn.large { padding: 12px 22px; font-size: 14px; background: #fff; color: #0d3b26; border: 0; }
 .hero .btn.large:hover { background: #f2f4f7; }
 .hero-side { flex: 0 0 auto; }
-.hero-ring { position: relative; display: grid; place-items: center; width: 112px; height: 112px;
-  border-radius: 50%; background: conic-gradient(#fff calc(var(--done) * 1%), rgba(255,255,255,.2) 0); }
-.hero-ring::after { content: ""; position: absolute; inset: 9px; border-radius: 50%;
-  background: rgba(0, 0, 0, .28); }
+/* Кольцо готовности. Внутренний круг — вырез маской, а не серый диск поверх:
+   диск с прозрачной чёрной подложкой мутнел на зелёном фоне. На полной
+   готовности заливка сплошная — у conic-gradient на 100% остаётся видимый шов
+   в 12 часов, и кольцо выглядело надломленным. */
+.hero-ring { position: relative; display: grid; place-items: center;
+  width: 112px; height: 112px; }
+.hero-ring::before { content: ""; position: absolute; inset: 0; border-radius: 50%;
+  background: conic-gradient(#fff calc(var(--done) * 1%), rgba(255, 255, 255, .24) 0);
+  -webkit-mask: radial-gradient(circle, transparent 45px, #000 46px);
+  mask: radial-gradient(circle, transparent 45px, #000 46px); }
+.hero-ring.full::before { background: #fff; }
 .hero-ring b, .hero-ring span { position: relative; z-index: 1; line-height: 1.1; }
 .hero-ring b { font-size: 22px; letter-spacing: -.5px; }
 .hero-ring span { font-size: 10px; letter-spacing: .6px; text-transform: uppercase; opacity: .78; }

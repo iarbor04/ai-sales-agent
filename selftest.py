@@ -107,6 +107,14 @@ def main() -> int:
     check("первый экран отвечает: работает или нет",
           "Агент работает и отвечает клиентам" in agent_html
           and "Агент ещё не отвечает клиентам" in agent_html)
+    css = (ROOT / "app/web/static/style.css").read_text(encoding="utf-8")
+    check("кольцо готовности не ломается на 100%",
+          ".hero-ring.full::before { background: #fff; }" in css
+          and "'full' if checklist.ready" in agent_html)
+    check("внутренний круг кольца — вырез, а не серый диск",
+          "mask: radial-gradient(circle, transparent 45px" in css
+          and "-webkit-mask: radial-gradient" in css)
+
     check("на первом экране один следующий шаг",
           "Дальше: {{ checklist.next.title | lower }}" in agent_html)
     # Вся настройка агента — одной страницей с вкладками: модель, база знаний,
