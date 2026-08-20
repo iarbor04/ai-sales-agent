@@ -480,8 +480,12 @@ def main() -> int:
 
     password = run_snippet("PASSWORD=$(")
     check("пароль генерируется, а не роняет установку", len(password) >= 12, password)
+    # Ищем только в исполняемых строках: в комментарии этот приём приведён
+    # как пример того, чего делать нельзя.
+    install_code = [line for line in install_sh.splitlines()
+                    if line.strip() and not line.strip().startswith("#")]
     check("в установщике не осталось пайпов в head — они дают SIGPIPE",
-          "| head -c" not in install_sh)
+          not [line for line in install_code if "| head -c" in line])
 
     check("установщик печатает доступы, а не оставляет их искать",
           "ГОТОВО" in install_sh and "Логин:" in install_sh and "Пароль:" in install_sh)
