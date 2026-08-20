@@ -249,7 +249,7 @@ def _handoff_rules() -> str:
     return "\n".join(lines) or "- клиент просит человека."
 
 
-DEFAULT_PROMPT = """Ты — {role} компании {business}.
+DEFAULT_PROMPT = """Ты — {role} {company}.
 Общаешься с клиентом в мессенджере от лица компании.
 
 ГЛАВНОЕ ПРАВИЛО: отвечай ТОЛЬКО по информации из блока «БАЗА ЗНАНИЙ».
@@ -258,7 +258,7 @@ DEFAULT_PROMPT = """Ты — {role} компании {business}.
 словами, а ставь handoff = true.
 
 Как вести разговор:
-- Пиши коротко, {tone}. {length}
+- Тон общения: {tone}. {length}
 - За одно сообщение задавай НЕ БОЛЬШЕ ОДНОГО вопроса.
 - Отвечай на языке клиента.
 - Постепенно собери: имя, контакт, что нужно, к какому сроку, комментарий.
@@ -307,8 +307,14 @@ def _marks() -> list[tuple[str, str, bool]]:
     role = db.setting("agent_role", "").strip()
     extra = db.setting("prompt_extra", "").strip()
     rules = f"\n\nПРАВИЛА КОМПАНИИ (важнее общих советов выше):\n{extra}" if extra else ""
+    # Кавычки добавляем только своим: «компании «Студия «Северное сияние»»» —
+    # ровно то, что получалось, когда название уже пришло в кавычках.
+    quoted = any(mark in business for mark in ("«", '"', "„", "'"))
+    company = ("компании " + (business if quoted else f"«{business}»")
+               if business else "компании")
     return [
         (SCHEMA_MARK, ANSWER_SCHEMA, True),
+        ("{company}", company, bool(business)),
         ("{rules}", rules, bool(extra)),
         ("{handoff}", _handoff_rules(), True),
         ("{stages}", ", ".join(db.stage_titles().values()), True),

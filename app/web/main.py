@@ -616,7 +616,6 @@ async def agent_page(request: Request):
     kb = knowledge.stats()
     return page(request, "agent.html",
                 checklist=onboarding.progress(),
-                prompt=llm.prompt_preview(),
                 agent_role=db.setting("agent_role", ""),
                 reply_length=db.setting("reply_length", "short"),
                 lengths=llm.LENGTHS,
@@ -1287,143 +1286,12 @@ async def script_copy(bot_id: int = Form(...)):
 # Как у конкурентов: бот собирается кликами за 10-30 минут, а не хождением
 # по разделам панели. Каждый шаг делается прямо здесь и сразу сохраняется.
 
-SETUP_STEPS = [
-    ("bot", "Подключить бота"),
-    ("business", "О бизнесе"),
-    ("knowledge", "База знаний"),
-    ("script", "Сценарий"),
-    ("launch", "Проверка и запуск"),
-]
+@app.get("/setup")
+async def setup_page():
+    """Мастер запуска убран: те же шаги живут на странице агента, и держать
+    два места, где «начать настройку», значило разводить их со временем."""
+    return RedirectResponse("/agent", status_code=303)
 
-
-def _setup_ready(step: str) -> bool:
-    """Пройден ли шаг по факту."""
-    if step == "bot":
-        return bool(db.bots(role="sales", only_enabled=True))
-    if step == "business":
-        return bool(db.setting("business_name", "").strip())
-    if step == "knowledge":
-        return knowledge.stats()["loaded"] > 0
-    if step == "script":
-        return bool(db.script())
-    if step == "launch":
-        return llm.ai_ready() and bool(db.bots(role="sales", only_enabled=True))
-    return False
-
-
-@app.get("/setup", response_class=HTMLResponse)
-async def setup_page(request: Request, step: str = "bot"):
-    if step not in dict(SETUP_STEPS):
-        step = "bot"
-    index = [k for k, _ in SETUP_STEPS].index(step)
-
-    return page(
-        request, "setup.html",
-        steps=SETUP_STEPS, step=step, index=index,
-        done={key: _setup_ready(key) for key, _ in SETUP_STEPS},
-        bots=db.bots(only_enabled=False),
-        live=set(telegram.BOTS),
-        values={k: db.setting(k, "") for k in
-                ("business_name", "business_site", "greeting", "tone",
-                 "operator_chat_id", "managers")},
-        kb=knowledge.stats(),
-        files=pricefile.files(),
-        extra=db.setting("kb_extra", ""),
-        script=db.script(),
-        templates=db.SCRIPT_TEMPLATES,
-        ai_ready=llm.ai_ready(),
-        key_source=_key_source(),
-        model=llm.current_model(),
-    )
-
-
-@app.post("/setup/bot")
-async def setup_bot(title: str = Form(""), token: str = Form(...),
-                    role: str = Form("sales"), platform: str = Form("tg")):
-    platform = platform if platform in ("tg", "max") else "tg"
-    probe = await channels.check_token(platform, token.strip())
-    if not probe["ok"]:
-        return RedirectResponse(f"/setup?step=bot&error={probe['error'][:100]}", status_code=303)
-    if not db.q1("SELECT 1 FROM bots WHERE token = ?", (token.strip(),)):
-        db.add_bot(title.strip() or f"@{probe['username']}", token.strip(),
-                   role if role in ("sales", "manager") else "sales", platform)
-        await channels.reload_all()
-    nxt = "business" if role == "sales" else "bot"
-    return RedirectResponse(f"/setup?step={nxt}", status_code=303)
-
-
-@app.post("/setup/business")
-async def setup_business(request: Request):
-    form = await request.form()
-    for key in ("business_name", "business_site", "greeting", "tone"):
-        if key in form:
-            db.set_setting(key, str(form.get(key) or ""))
-    return RedirectResponse("/setup?step=knowledge", status_code=303)
-
-
-@app.post("/setup/knowledge")
-async def setup_knowledge(request: Request):
-    """Все три источника знаний прямо в мастере, без перехода на другую страницу."""
-    form = await request.form()
-
-    upload = form.get("file")
-    file_error = ""
-    if upload is not None and getattr(upload, "filename", ""):
-        try:
-            await asyncio.to_thread(pricefile.save, upload.filename, await upload.read())
-        except pricefile.PriceFileError as exc:
-            file_error = f"Файл не прочитан: {exc}"
-
-    text = str(form.get("kb_extra") or "").strip()
-    if text != db.setting("kb_extra", ""):
-        db.set_setting("kb_extra", text)
-        knowledge.reindex_extra()
-
-    site = str(form.get("site") or "").strip()
-    if site:
-        db.set_setting("business_site", site)
-        await asyncio.to_thread(knowledge.discover, site)
-        await asyncio.to_thread(knowledge.fetch_pending)
-
-    retrieval.invalidate()
-    if file_error:
-        return RedirectResponse("/setup?step=knowledge&error=" + quote(file_error),
-                                status_code=303)
-    target = "knowledge" if form.get("stay") else "script"
-    return RedirectResponse(f"/setup?step={target}", status_code=303)
-
-
-@app.post("/setup/script")
-async def setup_script(template: str = Form(""), enable: str = Form("")):
-    if template:
-        db.apply_template(template)
-    for bot in db.bots(role="sales", only_enabled=False):
-        db.run("UPDATE bots SET script_enabled = ? WHERE id = ?",
-               (1 if enable else 0, bot["id"]))
-    return RedirectResponse("/setup?step=launch", status_code=303)
-
-
-@app.post("/setup/launch")
-async def setup_launch(request: Request):
-    form = await request.form()
-    raw_key = str(form.get("openrouter_key") or "")
-    key = _clean_key(raw_key)
-    if raw_key.strip() and not _key_looks_real(key):
-        return RedirectResponse(
-            "/setup?step=launch&error=" + quote("Ключ OpenRouter начинается на sk-or-. Проверьте, что скопировали именно его."),
-            status_code=303)
-    if key:
-        db.set_setting("openrouter_key", key)
-    if form.get("model"):
-        db.set_setting("model", str(form.get("model")))
-    if "operator_chat_id" in form:
-        db.set_setting("operator_chat_id", str(form.get("operator_chat_id") or ""))
-    if "managers" in form:
-        db.set_setting("managers", str(form.get("managers") or ""))
-    return RedirectResponse("/setup?step=launch&saved=1", status_code=303)
-
-
-# ── конструктор сценария ───────────────────────────────────────────────
 
 @app.post("/script/template")
 async def script_template(request: Request, template: str = Form(...),
@@ -1651,50 +1519,7 @@ async def widget_save(request: Request):
 
 # ── каналы: витрина подключений ────────────────────────────────────────
 
-CHANNEL_CARDS = [
-    {"code": "tg", "title": "Telegram", "link": "/bots",
-     "about": "ИИ-бот отвечает клиентам, ведёт по сценарию и передаёт менеджеру. "
-              "Ботов можно подключить сколько угодно.",
-     "tags": ["ИИ-бот", "Рассылки", "Фото и файлы", "Голосовые", "Кнопки"]},
-    {"code": "web", "title": "Чат на сайте", "link": "/widget",
-     "about": "Виджет ставится на сайт одной строкой. Ни токенов, ни ключей — "
-              "работает сразу.",
-     "tags": ["ИИ-бот", "Своё оформление", "Без ключей"]},
-    {"code": "wa", "title": "WhatsApp Business", "link": "/settings",
-     "about": "Через официальный Cloud API. Нужен домен с HTTPS и режим вебхуков.",
-     "tags": ["ИИ-бот", "Фото и файлы", "Нужен домен"]},
-    {"code": "max", "title": "MAX", "link": "/bots",
-     "about": "Мессенджер VK. Токен берётся у @MasterBot внутри MAX.",
-     "tags": ["ИИ-бот", "Вложения", "Кнопки"]},
-    {"code": "vk", "title": "ВКонтакте", "link": "/bots",
-     "about": "Сообщения сообщества. Ключ доступа — в настройках сообщества, "
-              "раздел «Работа с API».",
-     "tags": ["ИИ-бот", "Картинки", "Long Poll и Callback"]},
-    {"code": "avito", "title": "Авито", "link": "/bots",
-     "about": "Переписка с покупателями в объявлениях. Доступ выдаёт продавец "
-              "в личном кабинете.",
-     "tags": ["ИИ-бот", "Чаты объявлений", "Нужен домен"]},
-    {"code": "mail", "title": "Почта", "link": "/bots",
-     "about": "Тот же агент отвечает на письма и держит переписку в одном треде.",
-     "tags": ["ИИ-бот", "IMAP и SMTP", "Ответ в тред"]},
-]
-
-
-@app.get("/channels", response_class=HTMLResponse)
-async def channels_page(request: Request):
-    """Витрина каналов: что подключено, что можно подключить."""
-    live = channels.active()
-    bots = db.bots(only_enabled=False)
-
-    cards = []
-    for card in CHANNEL_CARDS:
-        code = card["code"]
-        connected = code in live
-        # сколько ботов этой платформы заведено
-        count = sum(1 for b in bots if b["platform"] == code)
-        cards.append({**card, "connected": connected, "count": count,
-                      "contacts": db.q1(
-                          "SELECT COUNT(*) AS c FROM contacts WHERE channel = ?",
-                          (code,))["c"]})
-
-    return page(request, "channels.html", cards=cards, live=live)
+@app.get("/channels")
+async def channels_page():
+    """Витрина каналов уехала в «Боты»: там же и подключение, дубль только путал."""
+    return RedirectResponse("/bots", status_code=303)

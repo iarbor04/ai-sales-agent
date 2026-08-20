@@ -115,24 +115,42 @@ def main() -> int:
           "step.how" in agent_html and "step.action" in agent_html)
     check("страница предупреждает про пустую фразу передачи",
           "разговор для него" in agent_html and "просто оборвётся" in agent_html)
-    check("сложное спрятано под «для тех, кто хочет глубже»",
-          "Для тех, кто хочет глубже" in agent_html
-          and "Показать инструкцию, которую получает ИИ" in agent_html)
+    check("промпт спрятан под раскрытие и назван промптом",
+          '<h2 class="section-title">Промпт</h2>' in agent_html
+          and "Показать промпт" in agent_html
+          and "нструкци" not in agent_html)
     check("новичок настраивает агента полями, а не текстом промпта",
-          agent_html.index("Как он разговаривает") < agent_html.index("Для тех, кто хочет глубже")
+          agent_html.index("Как он разговаривает")
+          < agent_html.index('<h2 class="section-title">Промпт</h2>')
           and "Когда звать живого менеджера" in agent_html)
     check("шаблоны сценариев вставляются кнопками",
           'class="chip" data-snippet' in agent_html and "Готовые сценарии" in agent_html)
     check("в редакторе промпта нет меток вида {business}",
           not any(mark in agent_html for mark in
                   ("{business}", "{role}", "{handoff}", "{schema}")))
+    # Дубли разделов убраны: мастер запуска повторял чек-лист на странице
+    # агента, витрина каналов — раздел «Боты». Пути оставлены как переходы,
+    # чтобы старые закладки и ссылки не отдавали 404.
+    base_html = (ROOT / "app/web/templates/base.html").read_text(encoding="utf-8")
+    check("в меню нет дублирующих разделов",
+          "Мастер запуска" not in base_html and 'href="/channels"' not in base_html)
+    check("старые адреса ведут в живые разделы",
+          {"/setup", "/channels"} <= routes)
+    bots_html = (ROOT / "app/web/templates/bots.html").read_text(encoding="utf-8")
+    check("каналы не из «Ботов» не потерялись",
+          'href="/widget"' in bots_html and "WhatsApp" in bots_html)
+    check("шаблонов удалённых страниц не осталось",
+          not (ROOT / "app/web/templates/setup.html").exists()
+          and not (ROOT / "app/web/templates/channels.html").exists())
+
     check("шаблон превращается в текст для промпта",
           "Веди разговор по шагам" in db.template_prompt("shop")
           and "Знакомство" in db.template_prompt("shop"))
     check("у несуществующего шаблона пустой текст, а не падение",
           db.template_prompt("нет-такого") == "")
-    check("сырой текст промпта спрятан под раскрытие",
-          "<details" in agent_html.split("Для тех, кто хочет глубже")[1].split("</form>")[0])
+    check("промпт показан один раз, без второй копии для чтения",
+          agent_html.count('id="prompt-template"') == 1
+          and "Показать текст целиком" not in agent_html)
 
     # свои правила должны попадать в промпт, но не ломать контракт
     db.set_setting("business_name", "BlackHat")
@@ -182,7 +200,16 @@ def main() -> int:
           '"reply"' not in editor and "JSON" not in editor)
     back = llm_mod.template_from_editor(editor)
     check("нетронутый текст узнаётся обратно в метки",
-          "{business}" in back and "{role}" in back and "{handoff}" in back)
+          "{company}" in back and "{role}" in back and "{handoff}" in back)
+    check("название компании не двоит кавычки",
+          "компании Студия «Северное сияние»" in llm_mod.render_prompt(back))
+    # Метку {business} держим ради промптов, сохранённых до появления {company}.
+    check("старые промпты с {business} всё ещё подставляются",
+          "Северное сияние" in llm_mod.render_prompt("Ты продавец {business}."))
+    db.set_setting("business_name", "")
+    check("без названия компании фраза остаётся целой",
+          "консультант компании." in llm_mod.prompt_for_editor())
+    db.set_setting("business_name", "Студия «Северное сияние»")
     check("нетронутый текст даёт тот же промпт, что стандартный",
           llm_mod.render_prompt(back) == llm_mod.render_prompt(llm_mod.DEFAULT_PROMPT))
     db.set_setting("business_name", "Другое имя")
@@ -1279,13 +1306,10 @@ def main() -> int:
           and any(f["name"] == "imap_host"
                   for f in next(p for p in web_main.BOT_PLATFORMS if p["code"] == "mail")["fields"]))
 
-    section("Витрина каналов")
-    from app.web.main import CHANNEL_CARDS
-    codes = {c["code"] for c in CHANNEL_CARDS}
-    check("карточка есть у каждого канала", codes == set(config.CHANNEL_TITLES),
-          f"расходятся: {codes ^ set(config.CHANNEL_TITLES)}")
-    check("у каждой карточки есть описание и метки",
-          all(c["about"] and c["tags"] and c["link"] for c in CHANNEL_CARDS))
+    # Витрину каналов убрали (дублировала «Боты»), но значки каналов остались
+    # в диалогах, лидах и на карточках ботов — их и проверяем.
+    section("Значки каналов")
+    codes = set(config.CHANNEL_TITLES)
     base_tpl = (ROOT / "app/web/templates/base.html").read_text()
     missing_brand = [c for c in codes if f"'{c}'" not in base_tpl]
     check("у каждого канала есть значок", not missing_brand, ", ".join(missing_brand))

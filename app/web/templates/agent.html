@@ -57,7 +57,7 @@
 
 <h2 class="section-title">Как он разговаривает</h2>
 <div class="card">
-  <p class="lead-text">Заполните обычными словами — инструкция для ИИ соберётся сама.</p>
+  <p class="lead-text">Заполните обычными словами — промпт соберётся сам.</p>
   <form method="post" action="/agent/prompt">
     <div class="row">
       <div class="field">
@@ -136,22 +136,22 @@
 </div>
 {% endif %}
 
-<h2 class="section-title">Для тех, кто хочет глубже</h2>
+<h2 class="section-title">Промпт</h2>
 <div class="card">
   <details class="prompt-editor" {{ 'open' if prompt_is_custom }}>
     <summary class="btn ghost small">
-      {{ 'Инструкция для ИИ изменена вручную — открыть' if prompt_is_custom
-         else 'Показать инструкцию, которую получает ИИ' }}
+      {{ 'Промпт изменён вручную — открыть' if prompt_is_custom
+         else 'Показать промпт' }}
     </summary>
 
     <p class="lead-text" style="margin-top:14px">
-      Всё, что вы заполнили выше, превращается вот в этот текст. Правьте его
-      как обычное письмо: что оставите как есть — будет и дальше подтягиваться
-      из полей, а переписанное останется вашими словами.
+      Это и есть промпт — весь текст, который агент получает перед каждым
+      ответом. Правьте его как обычное письмо: что оставите как есть — будет и
+      дальше подтягиваться из полей, а переписанное останется вашими словами.
     </p>
 
     {% if prompt_is_custom %}
-    <div class="callout">Инструкция переписана вами. Кнопка «Вернуть стандартный» ниже
+    <div class="callout">Промпт переписан вами. Кнопка «Вернуть стандартный» ниже
       возвращает исходный текст.</div>
     {% endif %}
 
@@ -181,14 +181,6 @@
       </div>
     </form>
 
-    <details style="margin-top:16px">
-      <summary class="small">Показать текст целиком, как его увидит ИИ ({{ prompt | length }} символов)</summary>
-      <p class="muted small" style="margin:8px 0">
-        К нему в каждом запросе добавляются подходящие куски базы знаний и
-        последние сообщения переписки.
-      </p>
-      <pre class="dump prompt-preview">{{ prompt }}</pre>
-    </details>
   </details>
 </div>
 
