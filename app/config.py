@@ -7,6 +7,11 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 
+def _path(value: str, default: Path) -> Path:
+    path = Path(value) if value else default
+    return path.expanduser().resolve()
+
+
 def _env(key: str, default: str = "") -> str:
     return os.environ.get(key, default).strip()
 
@@ -80,17 +85,27 @@ AI_ENABLED = bool(OPENROUTER_API_KEY)
 
 # ── панель ─────────────────────────────────────────────────────────────
 ADMIN_LOGIN = _env("ADMIN_LOGIN", "admin")
-ADMIN_PASSWORD = _env("ADMIN_PASSWORD", "admin")
-SECRET_KEY = _env("SECRET_KEY", "change-me-in-env")
-PUBLIC_URL = _env("PUBLIC_URL", "http://localhost:8000").rstrip("/")
+ADMIN_PASSWORD = _env("ADMIN_PASSWORD")
+SECRET_KEY = _env("SECRET_KEY")
+PUBLIC_URL = _env("PUBLIC_URL").rstrip("/")
 
 HOST = _env("HOST", "0.0.0.0")
 PORT = _int("PORT", 8000)
 
 # ── хранилище ──────────────────────────────────────────────────────────
-DB_PATH = Path(_env("DB_PATH", str(BASE_DIR / "data.db")))
-MEDIA_DIR = Path(_env("MEDIA_DIR", str(BASE_DIR / "media")))
+DATA_DIR = _path(_env("DATA_DIR"), BASE_DIR / "data")
+DB_PATH = _path(_env("DB_PATH"), DATA_DIR / "data.db")
+MEDIA_DIR = _path(_env("MEDIA_DIR"), DATA_DIR / "media")
+BACKUP_DIR = _path(_env("BACKUP_DIR"), DATA_DIR / "backups")
+LOG_DIR = _path(_env("LOG_DIR"), DATA_DIR / "logs")
 MEDIA_DIR.mkdir(parents=True, exist_ok=True)
+BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+LOG_DIR.mkdir(parents=True, exist_ok=True)
+
+PORTABLE_MODE = _env("PORTABLE_MODE", "0").lower() in ("1", "true", "yes", "on")
+PERSISTENT_STORAGE = _env("PERSISTENT_STORAGE", "0").lower() in ("1", "true", "yes", "on")
+LOG_LEVEL = _env("LOG_LEVEL", "INFO").upper()
+LOG_JSON = _env("LOG_JSON", "0").lower() in ("1", "true", "yes", "on")
 
 # ── режим приёма сообщений ─────────────────────────────────────────────
 # polling — long polling Telegram, публичный адрес не нужен

@@ -10,6 +10,7 @@ import contextlib
 import json
 import logging
 import uuid
+import os
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import quote
@@ -99,6 +100,7 @@ async def lifespan(app: FastAPI):
     yield
     await scheduler.stop()
     await channels.stop_all()
+    db.close()
 
 
 app = FastAPI(title="ИИ-продажник", lifespan=lifespan)
@@ -162,7 +164,7 @@ async def guard(request: Request, call_next):
     сообщения, которые никто не прочитает, хуже, чем не принимать.
     """
     path = request.url.path
-    open_paths = ("/login", "/static", "/hook", "/health",
+    open_paths = ("/login", "/static", "/hook", "/health", "/ready", "/version",
                   "/widget.js", "/api/widget")
     if not (path.startswith(open_paths) or authed(request)):
         return RedirectResponse("/login", status_code=303)
@@ -255,12 +257,30 @@ async def subscription_export():
 async def health():
     return {
         "ok": True,
+        "service": "ai-sales-agent",
+        "version": "0.1.0",
+        "database": "ok" if config.DB_PATH.exists() else "initializing",
         "channels": channels.active(),
-        "ai": llm.ai_ready(),
-        "model": llm.current_model(),
+        "model": llm.current_model() if llm.ai_ready() else "not_configured",
         "contacts": db.q1("SELECT COUNT(*) AS c FROM contacts")["c"],
         "leads": db.q1("SELECT COUNT(*) AS c FROM leads")["c"],
     }
+
+
+@app.get("/ready")
+async def ready():
+    try:
+        db.q1("SELECT 1 AS ok")
+        return {"ok": True, "database": "ok"}
+    except Exception as exc:  # noqa: BLE001
+        log.error("readiness failed: %s", type(exc).__name__)
+        return JSONResponse({"ok": False, "database": "error"}, status_code=503)
+
+
+@app.get("/version")
+async def version():
+    return {"service": "ai-sales-agent", "version": "0.1.0",
+            "commit": os.environ.get("APP_COMMIT", "unknown")}
 
 
 @app.get("/login", response_class=HTMLResponse)

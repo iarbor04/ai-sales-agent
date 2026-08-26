@@ -1,0 +1,11 @@
+services:
+  ai-sales-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile.portable
+    env_file: .env
+    ports: ["8000:8000"]
+    volumes: ["ai-sales-data:/app/data"]
+    restart: unless-stopped
+volumes:
+  ai-sales-data:

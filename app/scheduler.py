@@ -142,11 +142,16 @@ async def _loop() -> None:
 
 async def start() -> None:
     global _task
-    _task = asyncio.create_task(_loop())
+    if _task is None or _task.done():
+        _task = asyncio.create_task(_loop(), name="scheduler")
 
 
 async def stop() -> None:
     global _task
     if _task:
         _task.cancel()
+        try:
+            await _task
+        except asyncio.CancelledError:
+            pass
         _task = None

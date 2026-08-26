@@ -32,6 +32,14 @@ def connect() -> sqlite3.Connection:
     return _conn
 
 
+def close() -> None:
+    global _conn
+    with _lock:
+        if _conn is not None:
+            _conn.close()
+            _conn = None
+
+
 def q(sql: str, params: Iterable[Any] = ()) -> list[sqlite3.Row]:
     with _lock:
         return connect().execute(sql, tuple(params)).fetchall()
